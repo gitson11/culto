@@ -1,0 +1,36 @@
+# Ambiente
+.env
+.venv/
+env/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Dados gerados
+data/*.sqlite3
+data/app.log
+data/debug/*.html
+data/debug/*.png
+output/*.xlsx
+output/*.csv
+output/*.docx
+
+# Legado
+legacy/*.xlsm
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store

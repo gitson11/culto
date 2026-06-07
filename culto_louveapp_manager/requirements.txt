@@ -1,0 +1,8 @@
+customtkinter
+playwright
+python-dotenv
+pandas
+openpyxl
+python-docx
+beautifulsoup4
+lxml
