@@ -54,7 +54,10 @@ Troque `LOUVEAPP_PASSWORD` pela senha real. A senha nao e salva no banco, nao e 
 
 ## Como rodar
 
+Entre na pasta do aplicativo:
+
 ```bash
+cd culto_louveapp_manager
 python main.py
 ```
 
@@ -79,6 +82,33 @@ Na primeira abertura, o banco SQLite e criado automaticamente em:
 ```text
 data/culto_louveapp.sqlite3
 ```
+
+## Modelos de boletim
+
+Os modelos oficiais de boletim ficam em:
+
+```text
+templates/
+```
+
+O sistema aceita multiplos arquivos `.docx`. Cada arquivo pode representar um tipo diferente de culto, por exemplo:
+
+```text
+templates/modelo de boletim comum.docx
+templates/modelo de boletim ceia.docx
+```
+
+Na aba **Boletins** e na aba **Exportacoes**, escolha o modelo desejado antes de gerar o boletim. Se houver mais de um modelo e nenhum for escolhido, o sistema solicitara a escolha do tipo de culto.
+
+Para alterar o visual do boletim, edite o arquivo Word do modelo. O Python apenas substitui os placeholders.
+
+A lista completa de placeholders aceitos fica em:
+
+```text
+templates/PLACEHOLDERS.md
+```
+
+A substituicao ocorre no corpo do documento, tabelas, cabecalhos e rodapes.
 
 ## Importar o XLSM legado
 
@@ -107,14 +137,9 @@ Na aba **Boletins** voce pode:
 - excluir com confirmacao
 - limpar o formulario
 - pesquisar por data
-- gerar boletim DOCX
+- escolher o modelo de boletim
+- gerar boletim DOCX a partir do modelo escolhido
 - gerar repertorio DOCX
-
-### Uso com escala do LouveApp
-
-No topo do formulario de boletim existe o campo **Escala LouveApp**. Ao escolher uma escala, os campos de musica do boletim passam a abrir uma lista com apenas as musicas daquela escala.
-
-O sistema nao distribui as musicas automaticamente entre preludio, louvor, ofertas ou ceia, porque o LouveApp nao informa em qual momento cada musica sera tocada. A escolha de cada campo continua manual e filtrada pela escala selecionada. Quando a musica importada tem cantor/grupo e tom, os campos correspondentes sao preenchidos automaticamente.
 
 ## Pessoas do Louvor
 
@@ -147,7 +172,7 @@ Arquivos de debug da automacao web ficam em:
 data/debug/
 ```
 
-A aba **Debug/Logs** mostra os ultimos logs e abre as pastas `data/debug` e `output`.
+A aba **Debug/Logs** mostra os ultimos logs e abre as pastas `data/debug`, `templates` e `output`.
 
 ## Solucao de problemas
 
@@ -178,6 +203,10 @@ Coloque `BOLETIM_VBA_CORRIGIDO.xlsm` em `legacy/` ou selecione o arquivo manualm
 **Aba Planilha1 ou LOUVOR nao encontrada**
 
 Confira se o arquivo selecionado e o boletim legado correto.
+
+**Nenhum modelo de boletim aparece**
+
+Coloque os arquivos `.docx` dos modelos dentro da pasta `templates/` e clique em **Atualizar modelos**.
 
 **Erro ao exportar**
 
