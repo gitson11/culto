@@ -13,8 +13,8 @@ from typing import Callable, Optional
 
 import customtkinter as ctk
 
-from src.bulletin import generate_bulletin_by_date, generate_bulletin_docx
-from src.config import DEBUG_DIR, OUTPUT_DIR
+from src.bulletin import generate_bulletin_by_date, generate_bulletin_docx, list_bulletin_templates
+from src.config import DEBUG_DIR, OUTPUT_DIR, TEMPLATES_DIR
 from src.database import Database
 from src.exporters import (
     export_bulletins_csv,
@@ -82,42 +82,6 @@ BULLETIN_FIELD_SPECS = [
 ]
 
 LONG_TEXT_FIELDS = {"texto1", "texto2", "texto3", "texto_louvor", "ofertas_texto"}
-MUSIC_FIELD_NAMES = {
-    "preludio_musica",
-    "musica1",
-    "musica2",
-    "musica3",
-    "musica4",
-    "musica5",
-    "musica_pao",
-    "musica_vinho",
-    "musica_extra",
-    "musica_final",
-}
-MUSIC_TO_KEY_FIELD = {
-    "preludio_musica": "preludio_tom",
-    "musica1": "tom1",
-    "musica2": "tom2",
-    "musica3": "tom3",
-    "musica4": "tom4",
-    "musica5": "tom5",
-    "musica_pao": "tom_pao",
-    "musica_vinho": "tom_vinho",
-    "musica_extra": "tom_extra",
-    "musica_final": "tom_final",
-}
-MUSIC_TO_SINGER_FIELD = {
-    "preludio_musica": "preludio_cantor",
-    "musica1": "cantor1",
-    "musica2": "cantor2",
-    "musica3": "cantor3",
-    "musica4": "cantor4",
-    "musica5": "cantor5",
-    "musica_pao": "cantor_pao",
-    "musica_vinho": "cantor_vinho",
-    "musica_extra": "cantor_extra",
-    "musica_final": "cantor_final",
-}
 
 
 class CultoLouveAppManager(ctk.CTk):
@@ -131,9 +95,6 @@ class CultoLouveAppManager(ctk.CTk):
         self.current_bulletin_id: Optional[int] = None
         self.current_person_id: Optional[int] = None
         self.bulletin_widgets: dict[str, tk.Widget] = {}
-        self.schedule_combo_values: dict[str, dict[str, str]] = {}
-        self.selected_schedule: Optional[dict[str, str]] = None
-        self.schedule_song_choices: dict[str, dict[str, str]] = {}
 
         self.title("Culto LouveApp Manager")
         self.geometry("1280x820")
@@ -182,15 +143,12 @@ class CultoLouveAppManager(ctk.CTk):
     def _build_dashboard_tab(self) -> None:
         tab = self.tabs.tab("Dashboard")
         tab.grid_columnconfigure(0, weight=1)
-        tab.grid_rowconfigure(1, weight=1)
-
         ctk.CTkLabel(tab, text="Resumo operacional", font=("Segoe UI", 18, "bold")).grid(
             row=0, column=0, sticky="w", padx=16, pady=(16, 8)
         )
-        metrics = ctk.CTkFrame(tab)
-        metrics.grid(row=1, column=0, sticky="nsew", padx=16, pady=12)
-        metrics.grid_columnconfigure((0, 1), weight=1)
-
+        panel = ctk.CTkFrame(tab)
+        panel.grid(row=1, column=0, sticky="nsew", padx=16, pady=12)
+        panel.grid_columnconfigure((0, 1), weight=1)
         self.dashboard_labels: dict[str, ctk.CTkLabel] = {}
         labels = [
             ("bulletins", "Total de boletins"),
@@ -200,14 +158,12 @@ class CultoLouveAppManager(ctk.CTk):
             ("last_import", "Ultima importacao"),
         ]
         for index, (key, label) in enumerate(labels):
-            row = index // 2
-            column = index % 2
-            item = ctk.CTkFrame(metrics, fg_color="transparent")
-            item.grid(row=row, column=column, sticky="ew", padx=12, pady=10)
+            item = ctk.CTkFrame(panel, fg_color="transparent")
+            item.grid(row=index // 2, column=index % 2, sticky="ew", padx=12, pady=10)
             ctk.CTkLabel(item, text=label, font=("Segoe UI", 12, "bold")).pack(anchor="w")
-            value_label = ctk.CTkLabel(item, text="-", anchor="w", justify="left")
-            value_label.pack(anchor="w", fill="x")
-            self.dashboard_labels[key] = value_label
+            value = ctk.CTkLabel(item, text="-", anchor="w", justify="left")
+            value.pack(anchor="w", fill="x")
+            self.dashboard_labels[key] = value
 
     def _build_bulletins_tab(self) -> None:
         tab = self.tabs.tab("Boletins")
@@ -218,7 +174,7 @@ class CultoLouveAppManager(ctk.CTk):
         form_panel = ctk.CTkFrame(tab)
         form_panel.grid(row=0, column=0, sticky="nsew", padx=(12, 6), pady=12)
         form_panel.grid_columnconfigure(0, weight=1)
-        form_panel.grid_rowconfigure(2, weight=1)
+        form_panel.grid_rowconfigure(3, weight=1)
 
         button_bar = ctk.CTkFrame(form_panel, fg_color="transparent")
         button_bar.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
@@ -233,39 +189,33 @@ class CultoLouveAppManager(ctk.CTk):
         ):
             ctk.CTkButton(button_bar, text=text, width=112, command=command).pack(side="left", padx=4)
 
-        schedule_bar = ctk.CTkFrame(form_panel, fg_color="transparent")
-        schedule_bar.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
-        schedule_bar.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(schedule_bar, text="Escala LouveApp").grid(row=0, column=0, sticky="w", padx=(4, 8))
-        self.bulletin_schedule_combo = ctk.CTkComboBox(
-            schedule_bar,
-            values=["Sem escala selecionada"],
-            state="readonly",
-            command=self._on_bulletin_schedule_selected,
-        )
-        self.bulletin_schedule_combo.grid(row=0, column=1, sticky="ew", padx=(0, 8))
-        self.bulletin_schedule_combo.set("Sem escala selecionada")
-        ctk.CTkButton(schedule_bar, text="Limpar escala", width=110, command=self._clear_selected_schedule).grid(
+        template_bar = ctk.CTkFrame(form_panel, fg_color="transparent")
+        template_bar.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
+        template_bar.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(template_bar, text="Modelo de boletim").grid(row=0, column=0, sticky="w", padx=(4, 8))
+        self.bulletin_template_combo = ctk.CTkComboBox(template_bar, values=[], state="readonly")
+        self.bulletin_template_combo.grid(row=0, column=1, sticky="ew", padx=(0, 8))
+        ctk.CTkButton(template_bar, text="Atualizar modelos", width=140, command=self._refresh_template_options).grid(
             row=0, column=2, padx=(0, 8)
         )
-        self.schedule_hint_label = ctk.CTkLabel(schedule_bar, text="Musicas livres para preenchimento manual.")
-        self.schedule_hint_label.grid(row=0, column=3, sticky="w")
+        ctk.CTkButton(template_bar, text="Abrir templates", width=130, command=lambda: self._open_folder(TEMPLATES_DIR)).grid(
+            row=0, column=3
+        )
+
+        hint = ctk.CTkLabel(
+            form_panel,
+            text="Coloque os modelos .docx em templates/. Cada modelo representa um tipo de culto.",
+            anchor="w",
+        )
+        hint.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 6))
 
         scroll = ctk.CTkScrollableFrame(form_panel)
-        scroll.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        scroll.grid(row=3, column=0, sticky="nsew", padx=8, pady=(0, 8))
         scroll.grid_columnconfigure(1, weight=1)
-
         for row_index, (field_name, label) in enumerate(BULLETIN_FIELD_SPECS):
             ctk.CTkLabel(scroll, text=label).grid(row=row_index, column=0, sticky="w", padx=(4, 10), pady=4)
             if field_name in LONG_TEXT_FIELDS:
                 widget = ctk.CTkTextbox(scroll, height=70, wrap="word")
-            elif field_name in MUSIC_FIELD_NAMES:
-                widget = ctk.CTkComboBox(
-                    scroll,
-                    values=[],
-                    state="normal",
-                    command=lambda choice, field=field_name: self._apply_song_choice(field, choice),
-                )
             else:
                 widget = ctk.CTkEntry(scroll)
             widget.grid(row=row_index, column=1, sticky="ew", padx=(0, 4), pady=4)
@@ -286,7 +236,6 @@ class CultoLouveAppManager(ctk.CTk):
         ctk.CTkButton(search_bar, text="Pesquisar por Data", width=150, command=self._search_bulletins).grid(
             row=0, column=1
         )
-
         tree_frame, self.bulletins_tree = self._make_tree(
             list_panel,
             ("id", "date", "dirigente", "pregador", "source"),
@@ -300,16 +249,12 @@ class CultoLouveAppManager(ctk.CTk):
         tab = self.tabs.tab("Importar LouveApp")
         tab.grid_columnconfigure(0, weight=1)
         tab.grid_rowconfigure(2, weight=1)
-
         controls = ctk.CTkFrame(tab)
         controls.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 6))
         controls.grid_columnconfigure(3, weight=1)
         self.clear_louveapp_var = tk.BooleanVar(value=False)
         self.louveapp_import_button = ctk.CTkButton(
-            controls,
-            text="Importar escalas do LouveApp",
-            width=220,
-            command=self._start_louveapp_import,
+            controls, text="Importar escalas do LouveApp", width=220, command=self._start_louveapp_import
         )
         self.louveapp_import_button.grid(row=0, column=0, padx=8, pady=8)
         ctk.CTkCheckBox(
@@ -329,19 +274,10 @@ class CultoLouveAppManager(ctk.CTk):
         self.schedule_search_entry = ctk.CTkEntry(search_bar, placeholder_text="Buscar em escalas importadas")
         self.schedule_search_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
         ctk.CTkButton(search_bar, text="Buscar", width=100, command=self._refresh_schedules).grid(row=0, column=1)
-
         tree_frame, self.schedules_tree = self._make_tree(
             tab,
             ("id", "date", "time", "ministry", "role", "person", "title"),
-            {
-                "id": "ID",
-                "date": "Data",
-                "time": "Hora",
-                "ministry": "Ministerio",
-                "role": "Funcao",
-                "person": "Pessoa",
-                "title": "Titulo",
-            },
+            {"id": "ID", "date": "Data", "time": "Hora", "ministry": "Ministerio", "role": "Funcao", "person": "Pessoa", "title": "Titulo"},
             {"id": 50, "date": 90, "time": 70, "ministry": 120, "role": 120, "person": 150, "title": 260},
         )
         tree_frame.grid(row=2, column=0, sticky="nsew", padx=12, pady=(4, 12))
@@ -350,7 +286,6 @@ class CultoLouveAppManager(ctk.CTk):
         tab = self.tabs.tab("Importar Excel Legado")
         tab.grid_columnconfigure(0, weight=1)
         tab.grid_rowconfigure(2, weight=1)
-
         controls = ctk.CTkFrame(tab)
         controls.grid(row=0, column=0, sticky="ew", padx=12, pady=12)
         controls.grid_columnconfigure(1, weight=1)
@@ -362,7 +297,6 @@ class CultoLouveAppManager(ctk.CTk):
         ).grid(row=0, column=0, padx=8, pady=8)
         self.legacy_path_var = tk.StringVar(value="")
         ctk.CTkEntry(controls, textvariable=self.legacy_path_var).grid(row=0, column=1, sticky="ew", padx=8)
-
         actions = ctk.CTkFrame(tab, fg_color="transparent")
         actions.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 8))
         for text, command in (
@@ -371,7 +305,6 @@ class CultoLouveAppManager(ctk.CTk):
             ("Importar pessoas do louvor", self._import_legacy_people),
         ):
             ctk.CTkButton(actions, text=text, width=190, command=command).pack(side="left", padx=4)
-
         self.legacy_summary = ctk.CTkTextbox(tab, wrap="word")
         self.legacy_summary.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 12))
 
@@ -379,7 +312,6 @@ class CultoLouveAppManager(ctk.CTk):
         tab = self.tabs.tab("Pessoas do Louvor")
         tab.grid_columnconfigure(0, weight=1)
         tab.grid_rowconfigure(2, weight=1)
-
         controls = ctk.CTkFrame(tab)
         controls.grid(row=0, column=0, sticky="ew", padx=12, pady=12)
         controls.grid_columnconfigure(0, weight=1)
@@ -388,14 +320,12 @@ class CultoLouveAppManager(ctk.CTk):
         ctk.CTkButton(controls, text="Adicionar", width=110, command=self._add_person).grid(row=0, column=1, padx=4)
         ctk.CTkButton(controls, text="Editar", width=100, command=self._edit_person).grid(row=0, column=2, padx=4)
         ctk.CTkButton(controls, text="Inativar", width=100, command=self._inactivate_person).grid(row=0, column=3, padx=4)
-
         search_bar = ctk.CTkFrame(tab, fg_color="transparent")
         search_bar.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 8))
         search_bar.grid_columnconfigure(0, weight=1)
         self.person_search_entry = ctk.CTkEntry(search_bar, placeholder_text="Buscar nome")
         self.person_search_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
         ctk.CTkButton(search_bar, text="Buscar", width=100, command=self._refresh_people).grid(row=0, column=1)
-
         tree_frame, self.people_tree = self._make_tree(
             tab,
             ("id", "name", "active"),
@@ -409,7 +339,6 @@ class CultoLouveAppManager(ctk.CTk):
         tab = self.tabs.tab("Exportacoes")
         tab.grid_columnconfigure(0, weight=1)
         tab.grid_columnconfigure(1, weight=1)
-
         data_exports = ctk.CTkFrame(tab)
         data_exports.grid(row=0, column=0, sticky="nsew", padx=(12, 6), pady=12)
         ctk.CTkLabel(data_exports, text="Arquivos de dados", font=("Segoe UI", 15, "bold")).pack(anchor="w", padx=12, pady=12)
@@ -426,39 +355,42 @@ class CultoLouveAppManager(ctk.CTk):
         ctk.CTkLabel(doc_exports, text="Documentos DOCX", font=("Segoe UI", 15, "bold")).pack(anchor="w", padx=12, pady=12)
         self.doc_date_entry = ctk.CTkEntry(doc_exports, placeholder_text="Data para gerar por busca")
         self.doc_date_entry.pack(fill="x", padx=12, pady=(0, 8))
+        ctk.CTkLabel(doc_exports, text="Modelo de boletim").pack(anchor="w", padx=12, pady=(4, 2))
+        self.export_template_combo = ctk.CTkComboBox(doc_exports, values=[], state="readonly")
+        self.export_template_combo.pack(fill="x", padx=12, pady=(0, 8))
         ctk.CTkButton(doc_exports, text="Gerar boletim DOCX", command=self._generate_bulletin_by_date_input).pack(
             fill="x", padx=12, pady=6
         )
         ctk.CTkButton(doc_exports, text="Gerar repertorio DOCX", command=self._generate_repertoire_by_date_input).pack(
             fill="x", padx=12, pady=6
         )
+        ctk.CTkButton(doc_exports, text="Atualizar modelos", command=self._refresh_template_options).pack(
+            fill="x", padx=12, pady=(18, 6)
+        )
+        ctk.CTkButton(doc_exports, text="Abrir pasta templates", command=lambda: self._open_folder(TEMPLATES_DIR)).pack(
+            fill="x", padx=12, pady=6
+        )
         ctk.CTkButton(doc_exports, text="Abrir pasta output", command=lambda: self._open_folder(OUTPUT_DIR)).pack(
-            fill="x", padx=12, pady=(20, 6)
+            fill="x", padx=12, pady=6
         )
 
     def _build_logs_tab(self) -> None:
         tab = self.tabs.tab("Debug/Logs")
         tab.grid_columnconfigure(0, weight=1)
         tab.grid_rowconfigure(1, weight=1)
-
         controls = ctk.CTkFrame(tab, fg_color="transparent")
         controls.grid(row=0, column=0, sticky="ew", padx=12, pady=12)
         for text, command in (
             ("Mostrar ultimos logs", self._refresh_logs),
             ("Abrir pasta data/debug", lambda: self._open_folder(DEBUG_DIR)),
             ("Abrir pasta output", lambda: self._open_folder(OUTPUT_DIR)),
+            ("Abrir pasta templates", lambda: self._open_folder(TEMPLATES_DIR)),
         ):
             ctk.CTkButton(controls, text=text, width=170, command=command).pack(side="left", padx=4)
         self.logs_text = ctk.CTkTextbox(tab, wrap="word")
         self.logs_text.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
 
-    def _make_tree(
-        self,
-        parent: tk.Widget,
-        columns: tuple[str, ...],
-        headings: dict[str, str],
-        widths: dict[str, int],
-    ) -> tuple[ctk.CTkFrame, ttk.Treeview]:
+    def _make_tree(self, parent: tk.Widget, columns: tuple[str, ...], headings: dict[str, str], widths: dict[str, int]) -> tuple[ctk.CTkFrame, ttk.Treeview]:
         frame = ctk.CTkFrame(parent, fg_color="transparent")
         frame.grid_columnconfigure(0, weight=1)
         frame.grid_rowconfigure(0, weight=1)
@@ -477,7 +409,7 @@ class CultoLouveAppManager(ctk.CTk):
         self._refresh_bulletins()
         self._refresh_people()
         self._refresh_schedules()
-        self._refresh_bulletin_schedule_options()
+        self._refresh_template_options()
         self._refresh_logs()
 
     def _refresh_dashboard(self) -> None:
@@ -486,19 +418,39 @@ class CultoLouveAppManager(ctk.CTk):
         self.dashboard_labels["people"].configure(text=str(stats["people"]))
         self.dashboard_labels["schedules"].configure(text=str(stats["schedules"]))
         last_bulletin = stats["last_bulletin"]
-        if last_bulletin:
-            self.dashboard_labels["last_bulletin"].configure(
-                text=f"{last_bulletin.get('date_text') or '-'} | {last_bulletin.get('dirigente') or '-'} | {last_bulletin.get('pregador') or '-'}"
+        self.dashboard_labels["last_bulletin"].configure(
+            text=(
+                f"{last_bulletin.get('date_text') or '-'} | {last_bulletin.get('dirigente') or '-'} | {last_bulletin.get('pregador') or '-'}"
+                if last_bulletin else "-"
             )
-        else:
-            self.dashboard_labels["last_bulletin"].configure(text="-")
+        )
         last_import = stats["last_import"]
-        if last_import:
-            self.dashboard_labels["last_import"].configure(
-                text=f"{last_import.get('created_at')} | {last_import.get('source')} | {last_import.get('status')}\n{last_import.get('message')}"
-            )
-        else:
-            self.dashboard_labels["last_import"].configure(text="-")
+        self.dashboard_labels["last_import"].configure(
+            text=(f"{last_import.get('created_at')} | {last_import.get('source')} | {last_import.get('status')}\n{last_import.get('message')}" if last_import else "-")
+        )
+
+    def _refresh_template_options(self) -> None:
+        templates = [path.name for path in list_bulletin_templates()]
+        values = templates or ["Nenhum modelo encontrado"]
+        for combo_name in ("bulletin_template_combo", "export_template_combo"):
+            combo = getattr(self, combo_name, None)
+            if combo is None:
+                continue
+            current = combo.get()
+            combo.configure(values=values)
+            if current in values:
+                combo.set(current)
+            else:
+                combo.set(values[0])
+
+    def _selected_template_name(self, combo_name: str = "bulletin_template_combo") -> str | None:
+        combo = getattr(self, combo_name, None)
+        if combo is None:
+            return None
+        value = combo.get().strip()
+        if not value or value == "Nenhum modelo encontrado":
+            return None
+        return value
 
     def _widget_value(self, widget: tk.Widget) -> str:
         if isinstance(widget, ctk.CTkTextbox):
@@ -509,148 +461,30 @@ class CultoLouveAppManager(ctk.CTk):
         if isinstance(widget, ctk.CTkTextbox):
             widget.delete("1.0", "end")
             widget.insert("1.0", value or "")
-        elif isinstance(widget, ctk.CTkComboBox):
-            widget.set(value or "")
         else:
             widget.delete(0, "end")
             widget.insert(0, value or "")
 
     def _collect_bulletin_form(self) -> WorshipBulletin:
         values = {field: self._widget_value(widget) for field, widget in self.bulletin_widgets.items()}
-        bulletin = WorshipBulletin(**values, source="manual")
-        schedule_meta = self._selected_schedule_meta()
-        if schedule_meta:
-            bulletin.raw_json = json.dumps({"louveapp_schedule": schedule_meta}, ensure_ascii=False)
-        return bulletin
+        return WorshipBulletin(**values, source="manual")
 
     def _load_bulletin_into_form(self, bulletin: WorshipBulletin) -> None:
         self.current_bulletin_id = bulletin.id
         for field, widget in self.bulletin_widgets.items():
             self._set_widget_value(widget, getattr(bulletin, field, ""))
-        self._load_schedule_from_bulletin(bulletin)
 
     def _clear_bulletin_form(self) -> None:
         self.current_bulletin_id = None
         for widget in self.bulletin_widgets.values():
             self._set_widget_value(widget, "")
-        self._clear_selected_schedule()
-
-    def _refresh_bulletin_schedule_options(self) -> None:
-        if not hasattr(self, "bulletin_schedule_combo"):
-            return
-        summaries = self.db.list_louveapp_schedule_summaries()
-        self.schedule_combo_values = {"Sem escala selecionada": {}}
-        values = ["Sem escala selecionada"]
-        for summary in summaries:
-            label = summary["label"]
-            values.append(label)
-            self.schedule_combo_values[label] = summary
-        self.bulletin_schedule_combo.configure(values=values)
-        if self.selected_schedule:
-            selected_id = self.selected_schedule.get("external_id", "")
-            matching_label = self._schedule_label_by_external_id(selected_id)
-            if matching_label:
-                self.bulletin_schedule_combo.set(matching_label)
-            else:
-                self._clear_selected_schedule()
-        elif self.bulletin_schedule_combo.get() not in values:
-            self.bulletin_schedule_combo.set("Sem escala selecionada")
-
-    def _on_bulletin_schedule_selected(self, label: str) -> None:
-        summary = self.schedule_combo_values.get(label) or {}
-        if not summary:
-            self.selected_schedule = None
-            self._set_song_choices([])
-            self.schedule_hint_label.configure(text="Musicas livres para preenchimento manual.")
-            return
-        self.selected_schedule = summary
-        songs = self.db.list_louveapp_schedule_songs(summary["external_id"])
-        self._set_song_choices(songs)
-        self.schedule_hint_label.configure(
-            text=f"{len(songs)} musica(s) disponivel(is) para escolher nos campos do boletim."
-        )
-
-    def _clear_selected_schedule(self) -> None:
-        if hasattr(self, "bulletin_schedule_combo"):
-            self.bulletin_schedule_combo.set("Sem escala selecionada")
-        self.selected_schedule = None
-        self._set_song_choices([])
-        if hasattr(self, "schedule_hint_label"):
-            self.schedule_hint_label.configure(text="Musicas livres para preenchimento manual.")
-
-    def _set_song_choices(self, songs: list[dict[str, str]]) -> None:
-        self.schedule_song_choices = {song["display"]: song for song in songs}
-        values = list(self.schedule_song_choices.keys())
-        for field in MUSIC_FIELD_NAMES:
-            widget = self.bulletin_widgets.get(field)
-            if isinstance(widget, ctk.CTkComboBox):
-                widget.configure(values=values)
-
-    def _apply_song_choice(self, field_name: str, choice: str) -> None:
-        song = self.schedule_song_choices.get(choice)
-        if not song:
-            return
-        widget = self.bulletin_widgets.get(field_name)
-        if isinstance(widget, ctk.CTkComboBox):
-            widget.set(song["title"])
-        key_field = MUSIC_TO_KEY_FIELD.get(field_name)
-        if key_field and song.get("key"):
-            key_widget = self.bulletin_widgets.get(key_field)
-            if key_widget:
-                self._set_widget_value(key_widget, song["key"])
-        singer_field = MUSIC_TO_SINGER_FIELD.get(field_name)
-        if singer_field and song.get("artist"):
-            singer_widget = self.bulletin_widgets.get(singer_field)
-            if singer_widget:
-                self._set_widget_value(singer_widget, song["artist"])
-
-    def _selected_schedule_meta(self) -> Optional[dict[str, str]]:
-        if not self.selected_schedule:
-            return None
-        return {
-            "external_id": self.selected_schedule.get("external_id", ""),
-            "title": self.selected_schedule.get("title", ""),
-            "date_text": self.selected_schedule.get("date_text", ""),
-            "time_text": self.selected_schedule.get("time_text", ""),
-            "ministry": self.selected_schedule.get("ministry", ""),
-        }
-
-    def _schedule_label_by_external_id(self, external_id: str) -> str:
-        for label, summary in self.schedule_combo_values.items():
-            if summary.get("external_id") == external_id:
-                return label
-        return ""
-
-    def _load_schedule_from_bulletin(self, bulletin: WorshipBulletin) -> None:
-        try:
-            payload = json.loads(bulletin.raw_json or "{}")
-        except json.JSONDecodeError:
-            self._clear_selected_schedule()
-            return
-        schedule = payload.get("louveapp_schedule") if isinstance(payload, dict) else None
-        if not isinstance(schedule, dict):
-            self._clear_selected_schedule()
-            return
-        external_id = str(schedule.get("external_id") or "")
-        self._refresh_bulletin_schedule_options()
-        label = self._schedule_label_by_external_id(external_id)
-        if label:
-            self.bulletin_schedule_combo.set(label)
-            self._on_bulletin_schedule_selected(label)
-        else:
-            self.selected_schedule = {key: str(value or "") for key, value in schedule.items()}
-            self._set_song_choices([])
-            self.schedule_hint_label.configure(text="Escala vinculada nao esta mais na importacao atual.")
 
     def _new_bulletin(self) -> None:
         self._clear_bulletin_form()
         self.tabs.set("Boletins")
 
     def _save_bulletin(self) -> None:
-        self._run_action(
-            "Salvar boletim",
-            lambda: self._save_bulletin_inner(),
-        )
+        self._run_action("Salvar boletim", self._save_bulletin_inner)
 
     def _save_bulletin_inner(self) -> str:
         bulletin = self._collect_bulletin_form()
@@ -720,13 +554,14 @@ class CultoLouveAppManager(ctk.CTk):
         self._run_action("Gerar boletim", self._generate_bulletin_from_selection_inner)
 
     def _generate_bulletin_from_selection_inner(self) -> str:
+        template_name = self._selected_template_name("bulletin_template_combo")
         if not self.current_bulletin_id:
             date_text = self._widget_value(self.bulletin_widgets["date_text"])
             if not date_text:
                 raise ValueError("Selecione um boletim ou informe uma data.")
-            path = generate_bulletin_by_date(date_text)
+            path = generate_bulletin_by_date(date_text, template_name=template_name)
         else:
-            path = generate_bulletin_docx(self.current_bulletin_id)
+            path = generate_bulletin_docx(self.current_bulletin_id, template_name=template_name)
         return f"Boletim gerado: {path}"
 
     def _generate_repertoire_from_selection(self) -> None:
@@ -755,7 +590,6 @@ class CultoLouveAppManager(ctk.CTk):
         def worker() -> None:
             def progress(message: str) -> None:
                 self.worker_queue.put(("louveapp_status", message))
-
             result = import_louveapp_schedules(progress=progress, clear_existing=clear_existing)
             self.worker_queue.put(("louveapp_done", result))
 
@@ -777,7 +611,6 @@ class CultoLouveAppManager(ctk.CTk):
         self.louveapp_import_button.configure(state="normal")
         self.louveapp_status_label.configure(text=result.message)
         self._refresh_schedules()
-        self._refresh_bulletin_schedule_options()
         self._refresh_dashboard()
         if result.status == "success":
             messagebox.showinfo("Importar LouveApp", result.message)
@@ -795,15 +628,7 @@ class CultoLouveAppManager(ctk.CTk):
                 "",
                 "end",
                 iid=str(schedule.id),
-                values=(
-                    schedule.id,
-                    schedule.date_text,
-                    schedule.time_text,
-                    schedule.ministry,
-                    schedule.role,
-                    schedule.person_name,
-                    schedule.title,
-                ),
+                values=(schedule.id, schedule.date_text, schedule.time_text, schedule.ministry, schedule.role, schedule.person_name, schedule.title),
             )
 
     def _select_legacy_file(self) -> None:
@@ -827,8 +652,7 @@ class CultoLouveAppManager(ctk.CTk):
 
     def _inspect_legacy_file_inner(self) -> str:
         summary = inspect_legacy_workbook(self._legacy_path_or_none())
-        text = json.dumps(summary, ensure_ascii=False, indent=2)
-        self._append_legacy_summary(text)
+        self._append_legacy_summary(json.dumps(summary, ensure_ascii=False, indent=2))
         return "Arquivo inspecionado."
 
     def _import_legacy_bulletins(self) -> None:
@@ -905,19 +729,13 @@ class CultoLouveAppManager(ctk.CTk):
         for item in self.people_tree.get_children():
             self.people_tree.delete(item)
         for person in self.db.list_people(search):
-            self.people_tree.insert(
-                "",
-                "end",
-                iid=str(person.id),
-                values=(person.id, person.name, "Sim" if person.active else "Nao"),
-            )
+            self.people_tree.insert("", "end", iid=str(person.id), values=(person.id, person.name, "Sim" if person.active else "Nao"))
 
     def _on_person_selected(self, _event: tk.Event) -> None:
         selected = self.people_tree.selection()
         if not selected:
             return
-        person_id = int(selected[0])
-        self.current_person_id = person_id
+        self.current_person_id = int(selected[0])
         values = self.people_tree.item(selected[0], "values")
         self.person_name_entry.delete(0, "end")
         self.person_name_entry.insert(0, values[1])
@@ -941,7 +759,8 @@ class CultoLouveAppManager(ctk.CTk):
         date_text = self.doc_date_entry.get().strip()
         if not date_text:
             raise ValueError("Informe a data.")
-        return f"Boletim gerado: {generate_bulletin_by_date(date_text)}"
+        template_name = self._selected_template_name("export_template_combo")
+        return f"Boletim gerado: {generate_bulletin_by_date(date_text, template_name=template_name)}"
 
     def _generate_repertoire_by_date_input(self) -> None:
         self._run_action("Gerar repertorio por data", self._generate_repertoire_by_date_input_inner)
