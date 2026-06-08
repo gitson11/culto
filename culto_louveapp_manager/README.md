@@ -1,6 +1,10 @@
-# Culto LouveApp Manager
+# Ordem Liturgica
 
-Aplicativo desktop em Python para substituir e evoluir a logica do arquivo `BOLETIM_VBA_CORRIGIDO.xlsm`. Ele permite cadastrar boletins de culto, importar dados do Excel legado, manter a lista de pessoas do louvor, importar escalas do LouveApp com Playwright, exportar dados para Excel/CSV e gerar boletim ou repertorio em DOCX.
+**Gestao de boletins, escalas e repertorios do culto.**
+
+Ordem Liturgica e um aplicativo desktop em Python para organizar a preparacao do culto: cadastro de boletins, importacao de dados do Excel legado, gestao de integrantes do ministerio, importacao de escalas do LouveApp, exportacao para Excel/CSV e geracao de boletins ou repertorios em DOCX.
+
+> Decencia e ordem no servico cristao. Referencia conceitual: 1 Corintios 14:40.
 
 ## Tecnologias
 
@@ -61,23 +65,32 @@ cd culto_louveapp_manager
 python main.py
 ```
 
-## Como abrir sem terminal
+## Identidade visual e icone
 
-Foi gerado um pacote Windows em:
-
-```text
-release/Culto LouveApp Manager/
-```
-
-Para abrir sem PowerShell ou terminal, clique duas vezes em:
+A pasta de identidade visual fica em:
 
 ```text
-release/Culto LouveApp Manager/Culto LouveApp Manager.exe
+assets/
 ```
 
-Mantenha o `.exe` dentro dessa pasta, junto da pasta `_internal`. O arquivo `.env` fica fora do executavel, na mesma pasta do `.exe`, para nao embutir senha no programa.
+O sistema procura automaticamente um icone em:
+
+```text
+assets/ordem_liturgica.ico
+assets/app.ico
+```
+
+Se um desses arquivos existir, ele sera usado como icone da janela no Windows.
+
+## Banco de dados
 
 Na primeira abertura, o banco SQLite e criado automaticamente em:
+
+```text
+data/ordem_liturgica.sqlite3
+```
+
+Para preservar compatibilidade, se ja existir o banco antigo abaixo, o sistema continuara usando ele:
 
 ```text
 data/culto_louveapp.sqlite3
@@ -112,22 +125,23 @@ A substituicao ocorre no corpo do documento, tabelas, cabecalhos e rodapes.
 
 ## Importar o XLSM legado
 
-1. Coloque o arquivo real em `legacy/BOLETIM_VBA_CORRIGIDO.xlsm` ou selecione o arquivo pela aba **Importar Excel Legado**.
-2. Clique em **Inspecionar arquivo** para confirmar abas, cabecalhos e resumo VBA.
+1. Coloque o arquivo real em `legacy/BOLETIM_VBA_CORRIGIDO.xlsm` ou selecione o arquivo pela aba **Excel Legado**.
+2. Clique em **Inspecionar** para confirmar abas, cabecalhos e resumo VBA.
 3. Clique em **Importar boletins** para ler a aba `Planilha1`.
-4. Clique em **Importar pessoas do louvor** para ler a aba `LOUVOR`.
+4. Clique em **Importar integrantes** para ler a aba `LOUVOR`.
 
 O sistema nunca executa macros VBA. Ele apenas le dados da planilha.
 
 ## Importar do LouveApp
 
 1. Garanta que `.env` exista com email e senha.
-2. Clique em **Importar escalas do LouveApp**.
-3. O app abre o navegador, acessa `https://app.louveapp.com.br/#/login`, tenta os seletores conhecidos de login e procura escalas em menus e rotas provaveis.
+2. Abra a aba **Escalas**.
+3. Clique em **Importar LouveApp**.
+4. O app abre o navegador, acessa `https://app.louveapp.com.br/#/login`, tenta os seletores conhecidos de login e procura escalas em menus e rotas provaveis.
 
 A importacao roda em thread separada para a interface continuar responsiva. Se nenhuma escala for encontrada, o app salva HTML e screenshot em `data/debug/` e mostra mensagem amigavel.
 
-## Cadastro de boletins
+## Boletins
 
 Na aba **Boletins** voce pode:
 
@@ -141,9 +155,9 @@ Na aba **Boletins** voce pode:
 - gerar boletim DOCX a partir do modelo escolhido
 - gerar repertorio DOCX
 
-## Pessoas do Louvor
+## Ministerio
 
-A aba **Pessoas do Louvor** permite adicionar, editar, buscar e inativar nomes. Pessoas inativas permanecem no banco para historico.
+A aba **Ministerio** permite adicionar, editar, buscar e inativar integrantes. Integrantes inativos permanecem no banco para historico.
 
 ## Exportacoes
 
@@ -172,7 +186,7 @@ Arquivos de debug da automacao web ficam em:
 data/debug/
 ```
 
-A aba **Debug/Logs** mostra os ultimos logs e abre as pastas `data/debug`, `templates` e `output`.
+A aba **Logs** mostra os ultimos logs e abre as pastas `data/debug`, `templates` e `output`.
 
 ## Solucao de problemas
 
