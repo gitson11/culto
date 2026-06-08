@@ -19,6 +19,17 @@ class SavedScale:
     created_at: str
 
 
+@dataclass
+class SavedScaleAssignment:
+    id: int
+    scale_id: int
+    function_name: str
+    person_name: str
+    reason: str
+    warning: str
+    sort_order: int
+
+
 class GeneratedScalesRepository:
     def ensure_tables(self) -> None:
         with closing(get_connection()) as connection, connection:
@@ -111,12 +122,12 @@ class GeneratedScalesRepository:
             for row in rows
         ]
 
-    def get_assignments(self, scale_id: int) -> list[GeneratedScaleAssignment]:
+    def get_assignment_rows(self, scale_id: int) -> list[SavedScaleAssignment]:
         self.ensure_tables()
         with closing(get_connection()) as connection:
             rows = connection.execute(
                 """
-                SELECT function_name, person_name, reason, warning
+                SELECT id, scale_id, function_name, person_name, reason, warning, sort_order
                 FROM generated_scale_assignments
                 WHERE scale_id = ?
                 ORDER BY sort_order, id
@@ -124,14 +135,78 @@ class GeneratedScalesRepository:
                 (scale_id,),
             ).fetchall()
         return [
-            GeneratedScaleAssignment(
+            SavedScaleAssignment(
+                id=int(row["id"]),
+                scale_id=int(row["scale_id"]),
                 function_name=row["function_name"] or "",
                 person_name=row["person_name"] or "",
                 reason=row["reason"] or "",
                 warning=row["warning"] or "",
+                sort_order=int(row["sort_order"] or 0),
             )
             for row in rows
         ]
+
+    def get_assignments(self, scale_id: int) -> list[GeneratedScaleAssignment]:
+        return [
+            GeneratedScaleAssignment(
+                function_name=row.function_name,
+                person_name=row.person_name,
+                reason=row.reason,
+                warning=row.warning,
+            )
+            for row in self.get_assignment_rows(scale_id)
+        ]
+
+    def update_assignment(
+        self,
+        assignment_id: int,
+        function_name: str,
+        person_name: str,
+        reason: str = "ajuste manual",
+        warning: str = "",
+    ) -> None:
+        self.ensure_tables()
+        with closing(get_connection()) as connection, connection:
+            connection.execute(
+                """
+                UPDATE generated_scale_assignments
+                SET function_name = ?, person_name = ?, reason = ?, warning = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (function_name, person_name, reason, warning, now_text(), assignment_id),
+            )
+
+    def add_assignment(
+        self,
+        scale_id: int,
+        function_name: str,
+        person_name: str = "",
+        reason: str = "adicionado manualmente",
+        warning: str = "",
+    ) -> int:
+        self.ensure_tables()
+        current_time = now_text()
+        with closing(get_connection()) as connection, connection:
+            row = connection.execute(
+                "SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_order FROM generated_scale_assignments WHERE scale_id = ?",
+                (scale_id,),
+            ).fetchone()
+            sort_order = int(row["next_order"] or 1)
+            cursor = connection.execute(
+                """
+                INSERT INTO generated_scale_assignments(
+                    scale_id, function_name, person_name, reason, warning, sort_order, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (scale_id, function_name, person_name, reason, warning, sort_order, current_time, current_time),
+            )
+        return int(cursor.lastrowid)
+
+    def delete_assignment(self, assignment_id: int) -> None:
+        self.ensure_tables()
+        with closing(get_connection()) as connection, connection:
+            connection.execute("DELETE FROM generated_scale_assignments WHERE id = ?", (assignment_id,))
 
     def get_scale(self, scale_id: int) -> Optional[SavedScale]:
         self.ensure_tables()
