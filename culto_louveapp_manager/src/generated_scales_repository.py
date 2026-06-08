@@ -9,6 +9,9 @@ from src.models import now_text
 from src.scale_generator import GeneratedScaleAssignment, GeneratedScaleResult
 
 
+SCALE_STATUS_VALUES = ["rascunho", "revisada", "aprovada", "publicada", "cancelada"]
+
+
 @dataclass
 class SavedScale:
     id: int
@@ -65,6 +68,7 @@ class GeneratedScalesRepository:
                 """
             )
             connection.execute("CREATE INDEX IF NOT EXISTS idx_generated_scales_date ON generated_scales(service_date)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_generated_scales_status ON generated_scales(status)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_generated_assignments_scale ON generated_scale_assignments(scale_id)")
 
     def save_generated_scale(self, result: GeneratedScaleResult, service_date: str = "", notes: str = "") -> int:
@@ -116,7 +120,7 @@ class GeneratedScalesRepository:
                 title=row["title"] or "",
                 service_date=row["service_date"] or "",
                 model_name=row["model_name"] or "",
-                status=row["status"] or "",
+                status=row["status"] or "rascunho",
                 created_at=row["created_at"] or "",
             )
             for row in rows
@@ -157,6 +161,17 @@ class GeneratedScalesRepository:
             )
             for row in self.get_assignment_rows(scale_id)
         ]
+
+    def update_status(self, scale_id: int, status: str) -> None:
+        self.ensure_tables()
+        normalized = (status or "").strip().casefold()
+        if normalized not in SCALE_STATUS_VALUES:
+            raise ValueError(f"Status invalido: {status}")
+        with closing(get_connection()) as connection, connection:
+            connection.execute(
+                "UPDATE generated_scales SET status = ?, updated_at = ? WHERE id = ?",
+                (normalized, now_text(), scale_id),
+            )
 
     def update_assignment(
         self,
@@ -222,7 +237,7 @@ class GeneratedScalesRepository:
             title=row["title"] or "",
             service_date=row["service_date"] or "",
             model_name=row["model_name"] or "",
-            status=row["status"] or "",
+            status=row["status"] or "rascunho",
             created_at=row["created_at"] or "",
         )
 
@@ -243,6 +258,7 @@ class GeneratedScalesRepository:
             lines.append(f"*Data/periodo:* {scale.service_date}")
         if scale.model_name:
             lines.append(f"*Modelo:* {scale.model_name}")
+        lines.append(f"*Status:* {scale.status}")
         lines.append("")
         lines.append("*Equipe escalada:*")
         for assignment in assignments:
@@ -254,6 +270,7 @@ class GeneratedScalesRepository:
             lines.append("*Avisos para revisao:*")
             for assignment in warnings:
                 lines.append(f"- {assignment.function_name}: {assignment.warning}")
-        lines.append("")
-        lines.append("_Revise a escala antes de publicar._")
+        if scale.status != "publicada":
+            lines.append("")
+            lines.append("_Escala ainda nao marcada como publicada._")
         return "\n".join(lines)
