@@ -22,6 +22,7 @@ from src.logger import LOG_PATH, get_logger
 from src.louveapp_browser import import_louveapp_schedules
 from src.models import ImportResult, WorshipBulletin, WorshipPerson
 from src.repertoire import generate_repertoire_by_date, generate_repertoire_docx
+from src.scale_generator_view import ScaleGeneratorView
 from src.scale_models_view import ScaleModelsView
 
 logger = get_logger(__name__)
@@ -30,6 +31,7 @@ TAB_DASHBOARD = "Painel"
 TAB_BULLETINS = "Boletins"
 TAB_SCHEDULES = "Escalas"
 TAB_SCALE_MODELS = "Modelos"
+TAB_GENERATE_SCALE = "Gerar Escala"
 TAB_LEGACY = "Excel Legado"
 TAB_PEOPLE = "Ministerio"
 TAB_EXPORTS = "Exportacoes"
@@ -121,12 +123,13 @@ class CultoLouveAppManager(ctk.CTk):
 
         self.tabs = ctk.CTkTabview(self)
         self.tabs.pack(fill="both", expand=True, padx=12, pady=12)
-        for tab_name in (TAB_DASHBOARD, TAB_BULLETINS, TAB_SCHEDULES, TAB_SCALE_MODELS, TAB_LEGACY, TAB_PEOPLE, TAB_EXPORTS, TAB_LOGS):
+        for tab_name in (TAB_DASHBOARD, TAB_BULLETINS, TAB_SCHEDULES, TAB_SCALE_MODELS, TAB_GENERATE_SCALE, TAB_LEGACY, TAB_PEOPLE, TAB_EXPORTS, TAB_LOGS):
             self.tabs.add(tab_name)
         self._build_dashboard_tab()
         self._build_bulletins_tab()
         self._build_louveapp_tab()
         self._build_scale_models_tab()
+        self._build_scale_generator_tab()
         self._build_legacy_tab()
         self._build_people_tab()
         self._build_exports_tab()
@@ -219,6 +222,9 @@ class CultoLouveAppManager(ctk.CTk):
 
     def _build_scale_models_tab(self) -> None:
         self.scale_models_view = ScaleModelsView(self.tabs.tab(TAB_SCALE_MODELS))
+
+    def _build_scale_generator_tab(self) -> None:
+        self.scale_generator_view = ScaleGeneratorView(self.tabs.tab(TAB_GENERATE_SCALE))
 
     def _build_legacy_tab(self) -> None:
         tab = self.tabs.tab(TAB_LEGACY)
@@ -331,6 +337,8 @@ class CultoLouveAppManager(ctk.CTk):
         self._refresh_dashboard(); self._refresh_bulletins(); self._refresh_people(); self._refresh_schedules(); self._refresh_template_options(); self._refresh_logs()
         if hasattr(self, "scale_models_view"):
             self.scale_models_view.refresh()
+        if hasattr(self, "scale_generator_view"):
+            self.scale_generator_view.refresh_models()
 
     def _refresh_dashboard(self) -> None:
         stats = self.db.get_dashboard_stats()
