@@ -6,7 +6,7 @@ from tkinter import messagebox, ttk
 import customtkinter as ctk
 
 from src.generated_scale_exporters import export_saved_scale_docx, export_saved_scale_xlsx
-from src.generated_scales_repository import GeneratedScalesRepository
+from src.generated_scales_repository import GeneratedScalesRepository, SCALE_STATUS_VALUES
 from src.scale_generator import GeneratedScaleResult, ScaleGenerator
 from src.scale_models_repository import ScaleModelRepository
 
@@ -43,14 +43,14 @@ class ScaleGeneratorView:
         self.service_date_entry = ctk.CTkEntry(controls, placeholder_text="Ex.: domingo noite, 16/06/2026")
         self.service_date_entry.grid(row=0, column=3, sticky="ew", padx=(0, 12), pady=10)
 
-        ctk.CTkButton(controls, text="Atualizar", width=95, command=self.refresh_all).grid(row=0, column=4, padx=(0, 8), pady=10)
-        ctk.CTkButton(controls, text="Gerar", width=90, command=self.generate_scale).grid(row=0, column=5, padx=(0, 8), pady=10)
-        ctk.CTkButton(controls, text="Salvar", width=90, command=self.save_current_scale).grid(row=0, column=6, padx=(0, 8), pady=10)
-        ctk.CTkButton(controls, text="WhatsApp", width=105, command=self.copy_current_whatsapp_text).grid(row=0, column=7, padx=(0, 8), pady=10)
-        ctk.CTkButton(controls, text="Excel", width=80, command=self.export_current_xlsx).grid(row=0, column=8, padx=(0, 8), pady=10)
-        ctk.CTkButton(controls, text="Word", width=80, command=self.export_current_docx).grid(row=0, column=9, padx=(0, 10), pady=10)
+        ctk.CTkButton(controls, text="Atualizar", width=90, command=self.refresh_all).grid(row=0, column=4, padx=(0, 6), pady=10)
+        ctk.CTkButton(controls, text="Gerar", width=75, command=self.generate_scale).grid(row=0, column=5, padx=(0, 6), pady=10)
+        ctk.CTkButton(controls, text="Salvar", width=75, command=self.save_current_scale).grid(row=0, column=6, padx=(0, 6), pady=10)
+        ctk.CTkButton(controls, text="WhatsApp", width=90, command=self.copy_current_whatsapp_text).grid(row=0, column=7, padx=(0, 6), pady=10)
+        ctk.CTkButton(controls, text="Excel", width=70, command=self.export_current_xlsx).grid(row=0, column=8, padx=(0, 6), pady=10)
+        ctk.CTkButton(controls, text="Word", width=70, command=self.export_current_docx).grid(row=0, column=9, padx=(0, 10), pady=10)
 
-        help_text = "Gere a escala, salve como rascunho, ajuste manualmente as linhas e exporte somente depois da revisao."
+        help_text = "Gere a escala, salve, ajuste manualmente, altere o status e publique somente depois da revisao."
         ctk.CTkLabel(self.parent, text=help_text, anchor="w", justify="left").grid(
             row=1, column=0, columnspan=2, sticky="ew", padx=16, pady=(0, 6)
         )
@@ -102,8 +102,18 @@ class ScaleGeneratorView:
         ctk.CTkButton(saved_actions, text="Word", width=75, command=self.export_current_docx).pack(side="left", padx=3)
         ctk.CTkButton(saved_actions, text="Excluir", width=75, command=self.delete_saved_scale).pack(side="left", padx=3)
 
+        status_panel = ctk.CTkFrame(self.parent)
+        status_panel.grid(row=3, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 8))
+        status_panel.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(status_panel, text="Status da escala").grid(row=0, column=0, sticky="w", padx=(10, 6), pady=8)
+        self.status_combo = ctk.CTkComboBox(status_panel, values=SCALE_STATUS_VALUES, state="readonly")
+        self.status_combo.grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=8)
+        self.status_combo.set("rascunho")
+        ctk.CTkButton(status_panel, text="Atualizar status", width=140, command=self.update_scale_status).grid(row=0, column=2, padx=(0, 8), pady=8)
+        ctk.CTkButton(status_panel, text="Marcar publicada", width=140, command=lambda: self.set_scale_status("publicada")).grid(row=0, column=3, padx=(0, 10), pady=8)
+
         edit_panel = ctk.CTkFrame(self.parent)
-        edit_panel.grid(row=3, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 8))
+        edit_panel.grid(row=4, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 8))
         edit_panel.grid_columnconfigure(1, weight=1)
         edit_panel.grid_columnconfigure(3, weight=1)
         ctk.CTkLabel(edit_panel, text="Funcao").grid(row=0, column=0, sticky="w", padx=(10, 6), pady=(8, 4))
@@ -126,7 +136,7 @@ class ScaleGeneratorView:
         ctk.CTkButton(edit_actions, text="Limpar campos", width=120, command=self.clear_assignment_form).pack(side="left", padx=4)
 
         footer = ctk.CTkFrame(self.parent)
-        footer.grid(row=4, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 12))
+        footer.grid(row=5, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 12))
         footer.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(footer, text="Avisos / texto para WhatsApp", font=("Segoe UI", 13, "bold")).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 2))
         self.warnings_text = ctk.CTkTextbox(footer, height=110, wrap="word")
@@ -151,10 +161,13 @@ class ScaleGeneratorView:
 
     def refresh_saved_scales(self) -> None:
         self.saved_repository.ensure_tables()
+        selected = self._selected_saved_scale_id()
         for item in self.saved_tree.get_children():
             self.saved_tree.delete(item)
         for scale in self.saved_repository.list_scales():
             self.saved_tree.insert("", "end", iid=str(scale.id), values=(scale.id, scale.title, scale.status))
+        if selected and self.saved_tree.exists(str(selected)):
+            self.saved_tree.selection_set(str(selected))
 
     def generate_scale(self) -> None:
         label = self.model_combo.get().strip()
@@ -168,6 +181,7 @@ class ScaleGeneratorView:
             self.current_result = self.generator.generate(model_id, self.service_date_entry.get().strip())
             self.current_saved_scale_id = None
             self.current_assignment_id = None
+            self.status_combo.set("rascunho")
             self.insert_assignments_into_result_tree(self.current_result.assignments)
             if self.current_result.warnings:
                 self.warnings_text.insert("1.0", "\n".join(f"- {warning}" for warning in self.current_result.warnings))
@@ -198,15 +212,37 @@ class ScaleGeneratorView:
             self.load_saved_scale(int(selected[0]))
 
     def load_saved_scale(self, scale_id: int) -> None:
+        scale = self.saved_repository.get_scale(scale_id)
         self.current_saved_scale_id = scale_id
         self.current_result = None
         self.current_assignment_id = None
+        if scale:
+            self.status_combo.set(scale.status or "rascunho")
         self.clear_result_tree()
         for row in self.saved_repository.get_assignment_rows(scale_id):
             self.result_tree.insert("", "end", iid=str(row.id), values=(row.function_name, row.person_name, row.reason, row.warning))
         self.clear_assignment_form()
         self.warnings_text.delete("1.0", "end")
         self.warnings_text.insert("1.0", self.saved_repository.build_whatsapp_text(scale_id))
+
+    def update_scale_status(self) -> None:
+        if not self.current_saved_scale_id:
+            messagebox.showwarning("Status da escala", "Selecione uma escala salva.")
+            return
+        self.set_scale_status(self.status_combo.get())
+
+    def set_scale_status(self, status: str) -> None:
+        if not self.current_saved_scale_id:
+            messagebox.showwarning("Status da escala", "Selecione uma escala salva.")
+            return
+        try:
+            self.saved_repository.update_status(self.current_saved_scale_id, status)
+            self.status_combo.set(status)
+            self.refresh_saved_scales()
+            self.load_saved_scale(self.current_saved_scale_id)
+            messagebox.showinfo("Status da escala", f"Status atualizado para: {status}")
+        except Exception as exc:
+            messagebox.showerror("Status da escala", str(exc))
 
     def on_assignment_selected(self, _event) -> None:
         selected = self.result_tree.selection()
@@ -266,6 +302,7 @@ class ScaleGeneratorView:
         self.refresh_saved_scales()
         self.clear_result_tree()
         self.clear_assignment_form()
+        self.status_combo.set("rascunho")
         self.warnings_text.delete("1.0", "end")
 
     def copy_current_whatsapp_text(self) -> None:
@@ -337,6 +374,7 @@ class ScaleGeneratorView:
         if service_date:
             lines.append(f"*Data/periodo:* {service_date}")
         lines.append(f"*Modelo:* {self.current_result.model.name}")
+        lines.append("*Status:* rascunho")
         lines.append("")
         lines.append("*Equipe escalada:*")
         for assignment in self.current_result.assignments:
@@ -349,7 +387,7 @@ class ScaleGeneratorView:
             for assignment in warnings:
                 lines.append(f"- {assignment.function_name}: {assignment.warning}")
         lines.append("")
-        lines.append("_Revise a escala antes de publicar._")
+        lines.append("_Escala ainda nao salva/publicada._")
         return "\n".join(lines)
 
     def _copy_to_clipboard(self, text: str) -> None:
