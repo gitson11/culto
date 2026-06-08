@@ -5,7 +5,7 @@ from tkinter import messagebox, ttk
 
 import customtkinter as ctk
 
-from src.generated_scales_repository import GeneratedScalesRepository
+from src.generated_scales_repository import GeneratedScalesRepository, SavedScaleAssignment
 from src.scale_generator import GeneratedScaleResult, ScaleGenerator
 from src.scale_models_repository import ScaleModelRepository
 
@@ -19,6 +19,7 @@ class ScaleGeneratorView:
         self.model_lookup: dict[str, int] = {}
         self.current_result: GeneratedScaleResult | None = None
         self.current_saved_scale_id: int | None = None
+        self.current_assignment_id: int | None = None
         self._build()
         self.refresh_models()
         self.refresh_saved_scales()
@@ -46,10 +47,7 @@ class ScaleGeneratorView:
         ctk.CTkButton(controls, text="Salvar", width=90, command=self.save_current_scale).grid(row=0, column=6, padx=(0, 8), pady=10)
         ctk.CTkButton(controls, text="Copiar WhatsApp", width=135, command=self.copy_current_whatsapp_text).grid(row=0, column=7, padx=(0, 10), pady=10)
 
-        help_text = (
-            "A escala sugerida considera integrantes ativos, funcoes, instrumentos, voz, disponibilidade e nivel de experiencia. "
-            "Revise manualmente antes de publicar ou enviar."
-        )
+        help_text = "Gere a escala, salve como rascunho, ajuste manualmente as linhas e copie para WhatsApp apenas depois da revisao."
         ctk.CTkLabel(self.parent, text=help_text, anchor="w", justify="left").grid(
             row=1, column=0, columnspan=2, sticky="ew", padx=16, pady=(0, 6)
         )
@@ -58,7 +56,7 @@ class ScaleGeneratorView:
         result_panel.grid(row=2, column=0, sticky="nsew", padx=(12, 6), pady=(4, 8))
         result_panel.grid_columnconfigure(0, weight=1)
         result_panel.grid_rowconfigure(1, weight=1)
-        ctk.CTkLabel(result_panel, text="Escala sugerida", font=("Segoe UI", 14, "bold")).grid(
+        ctk.CTkLabel(result_panel, text="Escala sugerida / salva", font=("Segoe UI", 14, "bold")).grid(
             row=0, column=0, sticky="w", padx=10, pady=(8, 4)
         )
         self.result_tree = ttk.Treeview(
@@ -67,7 +65,7 @@ class ScaleGeneratorView:
             show="headings",
             selectmode="browse",
         )
-        headings = {"function": "Funcao", "person": "Integrante sugerido", "reason": "Motivo", "warning": "Aviso"}
+        headings = {"function": "Funcao", "person": "Integrante", "reason": "Motivo", "warning": "Aviso"}
         widths = {"function": 150, "person": 170, "reason": 280, "warning": 230}
         for column in ("function", "person", "reason", "warning"):
             self.result_tree.heading(column, text=headings[column])
@@ -76,6 +74,7 @@ class ScaleGeneratorView:
         self.result_tree.configure(yscrollcommand=scrollbar.set)
         self.result_tree.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=(0, 10))
         scrollbar.grid(row=1, column=1, sticky="ns", pady=(0, 10), padx=(0, 10))
+        self.result_tree.bind("<<TreeviewSelect>>", self.on_assignment_selected)
 
         saved_panel = ctk.CTkFrame(self.parent)
         saved_panel.grid(row=2, column=1, sticky="nsew", padx=(6, 12), pady=(4, 8))
@@ -84,12 +83,7 @@ class ScaleGeneratorView:
         ctk.CTkLabel(saved_panel, text="Escalas salvas", font=("Segoe UI", 14, "bold")).grid(
             row=0, column=0, sticky="w", padx=10, pady=(8, 4)
         )
-        self.saved_tree = ttk.Treeview(
-            saved_panel,
-            columns=("id", "title", "status"),
-            show="headings",
-            selectmode="browse",
-        )
+        self.saved_tree = ttk.Treeview(saved_panel, columns=("id", "title", "status"), show="headings", selectmode="browse")
         self.saved_tree.heading("id", text="ID")
         self.saved_tree.heading("title", text="Escala")
         self.saved_tree.heading("status", text="Status")
@@ -103,13 +97,34 @@ class ScaleGeneratorView:
         ctk.CTkButton(saved_actions, text="Copiar", width=90, command=self.copy_saved_whatsapp_text).pack(side="left", padx=4)
         ctk.CTkButton(saved_actions, text="Excluir", width=90, command=self.delete_saved_scale).pack(side="left", padx=4)
 
+        edit_panel = ctk.CTkFrame(self.parent)
+        edit_panel.grid(row=3, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 8))
+        edit_panel.grid_columnconfigure(1, weight=1)
+        edit_panel.grid_columnconfigure(3, weight=1)
+        ctk.CTkLabel(edit_panel, text="Funcao").grid(row=0, column=0, sticky="w", padx=(10, 6), pady=(8, 4))
+        self.edit_function_entry = ctk.CTkEntry(edit_panel)
+        self.edit_function_entry.grid(row=0, column=1, sticky="ew", padx=(0, 12), pady=(8, 4))
+        ctk.CTkLabel(edit_panel, text="Integrante").grid(row=0, column=2, sticky="w", padx=(10, 6), pady=(8, 4))
+        self.edit_person_entry = ctk.CTkEntry(edit_panel)
+        self.edit_person_entry.grid(row=0, column=3, sticky="ew", padx=(0, 12), pady=(8, 4))
+        ctk.CTkLabel(edit_panel, text="Motivo").grid(row=1, column=0, sticky="w", padx=(10, 6), pady=4)
+        self.edit_reason_entry = ctk.CTkEntry(edit_panel)
+        self.edit_reason_entry.grid(row=1, column=1, sticky="ew", padx=(0, 12), pady=4)
+        ctk.CTkLabel(edit_panel, text="Aviso").grid(row=1, column=2, sticky="w", padx=(10, 6), pady=4)
+        self.edit_warning_entry = ctk.CTkEntry(edit_panel)
+        self.edit_warning_entry.grid(row=1, column=3, sticky="ew", padx=(0, 12), pady=4)
+        edit_actions = ctk.CTkFrame(edit_panel, fg_color="transparent")
+        edit_actions.grid(row=2, column=0, columnspan=4, sticky="ew", padx=8, pady=(6, 8))
+        ctk.CTkButton(edit_actions, text="Adicionar linha", width=120, command=self.add_assignment).pack(side="left", padx=4)
+        ctk.CTkButton(edit_actions, text="Editar linha", width=110, command=self.update_assignment).pack(side="left", padx=4)
+        ctk.CTkButton(edit_actions, text="Remover linha", width=120, command=self.delete_assignment).pack(side="left", padx=4)
+        ctk.CTkButton(edit_actions, text="Limpar campos", width=120, command=self.clear_assignment_form).pack(side="left", padx=4)
+
         footer = ctk.CTkFrame(self.parent)
-        footer.grid(row=3, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 12))
+        footer.grid(row=4, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 12))
         footer.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(footer, text="Avisos / texto para WhatsApp", font=("Segoe UI", 13, "bold")).grid(
-            row=0, column=0, sticky="w", padx=10, pady=(8, 2)
-        )
-        self.warnings_text = ctk.CTkTextbox(footer, height=120, wrap="word")
+        ctk.CTkLabel(footer, text="Avisos / texto para WhatsApp", font=("Segoe UI", 13, "bold")).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 2))
+        self.warnings_text = ctk.CTkTextbox(footer, height=110, wrap="word")
         self.warnings_text.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 10))
 
     def refresh_all(self) -> None:
@@ -118,12 +133,11 @@ class ScaleGeneratorView:
 
     def refresh_models(self) -> None:
         self.model_lookup.clear()
-        models = self.repository.list_models()
         labels: list[str] = []
-        for model in models:
+        for model in self.repository.list_models():
             if not model.id:
                 continue
-            label = f"{model.name} — {model.service_type}" if model.service_type else model.name
+            label = f"{model.name} - {model.service_type}" if model.service_type else model.name
             labels.append(label)
             self.model_lookup[label] = model.id
         values = labels or ["Nenhum modelo cadastrado"]
@@ -148,6 +162,7 @@ class ScaleGeneratorView:
         try:
             self.current_result = self.generator.generate(model_id, self.service_date_entry.get().strip())
             self.current_saved_scale_id = None
+            self.current_assignment_id = None
             self.insert_assignments_into_result_tree(self.current_result.assignments)
             if self.current_result.warnings:
                 self.warnings_text.insert("1.0", "\n".join(f"- {warning}" for warning in self.current_result.warnings))
@@ -167,20 +182,76 @@ class ScaleGeneratorView:
                 notes=self.warnings_text.get("1.0", "end").strip(),
             )
             self.refresh_saved_scales()
+            self.load_saved_scale(self.current_saved_scale_id)
             messagebox.showinfo("Salvar escala", f"Escala salva com ID {self.current_saved_scale_id}.")
         except Exception as exc:
             messagebox.showerror("Salvar escala", str(exc))
 
     def on_saved_scale_selected(self, _event) -> None:
         selected = self.saved_tree.selection()
+        if selected:
+            self.load_saved_scale(int(selected[0]))
+
+    def load_saved_scale(self, scale_id: int) -> None:
+        self.current_saved_scale_id = scale_id
+        self.current_result = None
+        self.current_assignment_id = None
+        self.clear_result_tree()
+        for row in self.saved_repository.get_assignment_rows(scale_id):
+            self.result_tree.insert(
+                "",
+                "end",
+                iid=str(row.id),
+                values=(row.function_name, row.person_name, row.reason, row.warning),
+            )
+        self.clear_assignment_form()
+        self.warnings_text.delete("1.0", "end")
+        self.warnings_text.insert("1.0", self.saved_repository.build_whatsapp_text(scale_id))
+
+    def on_assignment_selected(self, _event) -> None:
+        selected = self.result_tree.selection()
         if not selected:
             return
-        self.current_saved_scale_id = int(selected[0])
-        assignments = self.saved_repository.get_assignments(self.current_saved_scale_id)
-        self.clear_result_tree()
-        self.insert_assignments_into_result_tree(assignments)
-        self.warnings_text.delete("1.0", "end")
-        self.warnings_text.insert("1.0", self.saved_repository.build_whatsapp_text(self.current_saved_scale_id))
+        try:
+            self.current_assignment_id = int(selected[0])
+        except ValueError:
+            self.current_assignment_id = None
+        values = self.result_tree.item(selected[0], "values")
+        self._set_entry(self.edit_function_entry, values[0] if len(values) > 0 else "")
+        self._set_entry(self.edit_person_entry, values[1] if len(values) > 1 else "")
+        self._set_entry(self.edit_reason_entry, values[2] if len(values) > 2 else "")
+        self._set_entry(self.edit_warning_entry, values[3] if len(values) > 3 else "")
+
+    def add_assignment(self) -> None:
+        if not self.current_saved_scale_id:
+            messagebox.showwarning("Adicionar linha", "Salve ou selecione uma escala antes de editar.")
+            return
+        function_name, person_name, reason, warning = self._assignment_form_values()
+        if not function_name:
+            messagebox.showwarning("Adicionar linha", "Informe a funcao.")
+            return
+        self.saved_repository.add_assignment(self.current_saved_scale_id, function_name, person_name, reason or "adicionado manualmente", warning)
+        self.load_saved_scale(self.current_saved_scale_id)
+
+    def update_assignment(self) -> None:
+        if not self.current_saved_scale_id or not self.current_assignment_id:
+            messagebox.showwarning("Editar linha", "Selecione uma linha de uma escala salva.")
+            return
+        function_name, person_name, reason, warning = self._assignment_form_values()
+        if not function_name:
+            messagebox.showwarning("Editar linha", "Informe a funcao.")
+            return
+        self.saved_repository.update_assignment(self.current_assignment_id, function_name, person_name, reason or "ajuste manual", warning)
+        self.load_saved_scale(self.current_saved_scale_id)
+
+    def delete_assignment(self) -> None:
+        if not self.current_saved_scale_id or not self.current_assignment_id:
+            messagebox.showwarning("Remover linha", "Selecione uma linha de uma escala salva.")
+            return
+        if not messagebox.askyesno("Remover linha", "Deseja remover esta linha da escala?"):
+            return
+        self.saved_repository.delete_assignment(self.current_assignment_id)
+        self.load_saved_scale(self.current_saved_scale_id)
 
     def delete_saved_scale(self) -> None:
         selected_id = self._selected_saved_scale_id()
@@ -191,8 +262,10 @@ class ScaleGeneratorView:
             return
         self.saved_repository.delete_scale(selected_id)
         self.current_saved_scale_id = None
+        self.current_assignment_id = None
         self.refresh_saved_scales()
         self.clear_result_tree()
+        self.clear_assignment_form()
         self.warnings_text.delete("1.0", "end")
 
     def copy_current_whatsapp_text(self) -> None:
@@ -215,6 +288,23 @@ class ScaleGeneratorView:
     def _selected_saved_scale_id(self) -> int | None:
         selected = self.saved_tree.selection()
         return int(selected[0]) if selected else self.current_saved_scale_id
+
+    def _assignment_form_values(self) -> tuple[str, str, str, str]:
+        return (
+            self.edit_function_entry.get().strip(),
+            self.edit_person_entry.get().strip(),
+            self.edit_reason_entry.get().strip(),
+            self.edit_warning_entry.get().strip(),
+        )
+
+    def clear_assignment_form(self) -> None:
+        self.current_assignment_id = None
+        for entry in (self.edit_function_entry, self.edit_person_entry, self.edit_reason_entry, self.edit_warning_entry):
+            self._set_entry(entry, "")
+
+    def _set_entry(self, entry: ctk.CTkEntry, value: str) -> None:
+        entry.delete(0, "end")
+        entry.insert(0, value or "")
 
     def _build_unsaved_whatsapp_text(self) -> str:
         if not self.current_result:
@@ -252,9 +342,10 @@ class ScaleGeneratorView:
             self.result_tree.delete(item)
 
     def insert_assignments_into_result_tree(self, assignments) -> None:
-        for assignment in assignments:
+        for index, assignment in enumerate(assignments, start=1):
             self.result_tree.insert(
                 "",
                 "end",
+                iid=f"preview-{index}",
                 values=(assignment.function_name, assignment.person_name, assignment.reason, assignment.warning),
             )
