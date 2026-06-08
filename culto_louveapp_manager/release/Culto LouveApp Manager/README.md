@@ -44,7 +44,7 @@ O app abre sem `.env`. O arquivo so e obrigatorio quando voce clicar para import
 Crie uma copia de `.env.example` chamada `.env`:
 
 ```env
-LOUVEAPP_EMAIL=rubemacesso@gmail.com
+LOUVEAPP_EMAIL=seumaillouveapp
 LOUVEAPP_PASSWORD=coloque_sua_senha_aqui
 HEADLESS=false
 SLOW_MO_MS=150
