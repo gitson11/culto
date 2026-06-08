@@ -5,7 +5,8 @@ from tkinter import messagebox, ttk
 
 import customtkinter as ctk
 
-from src.generated_scales_repository import GeneratedScalesRepository, SavedScaleAssignment
+from src.generated_scale_exporters import export_saved_scale_docx, export_saved_scale_xlsx
+from src.generated_scales_repository import GeneratedScalesRepository
 from src.scale_generator import GeneratedScaleResult, ScaleGenerator
 from src.scale_models_repository import ScaleModelRepository
 
@@ -45,9 +46,11 @@ class ScaleGeneratorView:
         ctk.CTkButton(controls, text="Atualizar", width=95, command=self.refresh_all).grid(row=0, column=4, padx=(0, 8), pady=10)
         ctk.CTkButton(controls, text="Gerar", width=90, command=self.generate_scale).grid(row=0, column=5, padx=(0, 8), pady=10)
         ctk.CTkButton(controls, text="Salvar", width=90, command=self.save_current_scale).grid(row=0, column=6, padx=(0, 8), pady=10)
-        ctk.CTkButton(controls, text="Copiar WhatsApp", width=135, command=self.copy_current_whatsapp_text).grid(row=0, column=7, padx=(0, 10), pady=10)
+        ctk.CTkButton(controls, text="WhatsApp", width=105, command=self.copy_current_whatsapp_text).grid(row=0, column=7, padx=(0, 8), pady=10)
+        ctk.CTkButton(controls, text="Excel", width=80, command=self.export_current_xlsx).grid(row=0, column=8, padx=(0, 8), pady=10)
+        ctk.CTkButton(controls, text="Word", width=80, command=self.export_current_docx).grid(row=0, column=9, padx=(0, 10), pady=10)
 
-        help_text = "Gere a escala, salve como rascunho, ajuste manualmente as linhas e copie para WhatsApp apenas depois da revisao."
+        help_text = "Gere a escala, salve como rascunho, ajuste manualmente as linhas e exporte somente depois da revisao."
         ctk.CTkLabel(self.parent, text=help_text, anchor="w", justify="left").grid(
             row=1, column=0, columnspan=2, sticky="ew", padx=16, pady=(0, 6)
         )
@@ -94,8 +97,10 @@ class ScaleGeneratorView:
         self.saved_tree.bind("<<TreeviewSelect>>", self.on_saved_scale_selected)
         saved_actions = ctk.CTkFrame(saved_panel, fg_color="transparent")
         saved_actions.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
-        ctk.CTkButton(saved_actions, text="Copiar", width=90, command=self.copy_saved_whatsapp_text).pack(side="left", padx=4)
-        ctk.CTkButton(saved_actions, text="Excluir", width=90, command=self.delete_saved_scale).pack(side="left", padx=4)
+        ctk.CTkButton(saved_actions, text="Copiar", width=75, command=self.copy_saved_whatsapp_text).pack(side="left", padx=3)
+        ctk.CTkButton(saved_actions, text="Excel", width=75, command=self.export_current_xlsx).pack(side="left", padx=3)
+        ctk.CTkButton(saved_actions, text="Word", width=75, command=self.export_current_docx).pack(side="left", padx=3)
+        ctk.CTkButton(saved_actions, text="Excluir", width=75, command=self.delete_saved_scale).pack(side="left", padx=3)
 
         edit_panel = ctk.CTkFrame(self.parent)
         edit_panel.grid(row=3, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 8))
@@ -198,12 +203,7 @@ class ScaleGeneratorView:
         self.current_assignment_id = None
         self.clear_result_tree()
         for row in self.saved_repository.get_assignment_rows(scale_id):
-            self.result_tree.insert(
-                "",
-                "end",
-                iid=str(row.id),
-                values=(row.function_name, row.person_name, row.reason, row.warning),
-            )
+            self.result_tree.insert("", "end", iid=str(row.id), values=(row.function_name, row.person_name, row.reason, row.warning))
         self.clear_assignment_form()
         self.warnings_text.delete("1.0", "end")
         self.warnings_text.insert("1.0", self.saved_repository.build_whatsapp_text(scale_id))
@@ -284,6 +284,28 @@ class ScaleGeneratorView:
             messagebox.showwarning("Copiar WhatsApp", "Selecione uma escala salva.")
             return
         self._copy_to_clipboard(self.saved_repository.build_whatsapp_text(selected_id))
+
+    def export_current_xlsx(self) -> None:
+        selected_id = self._selected_saved_scale_id()
+        if not selected_id:
+            messagebox.showwarning("Exportar Excel", "Salve ou selecione uma escala antes de exportar.")
+            return
+        try:
+            path = export_saved_scale_xlsx(selected_id)
+            messagebox.showinfo("Exportar Excel", f"Arquivo gerado: {path}")
+        except Exception as exc:
+            messagebox.showerror("Exportar Excel", str(exc))
+
+    def export_current_docx(self) -> None:
+        selected_id = self._selected_saved_scale_id()
+        if not selected_id:
+            messagebox.showwarning("Exportar Word", "Salve ou selecione uma escala antes de exportar.")
+            return
+        try:
+            path = export_saved_scale_docx(selected_id)
+            messagebox.showinfo("Exportar Word", f"Arquivo gerado: {path}")
+        except Exception as exc:
+            messagebox.showerror("Exportar Word", str(exc))
 
     def _selected_saved_scale_id(self) -> int | None:
         selected = self.saved_tree.selection()
