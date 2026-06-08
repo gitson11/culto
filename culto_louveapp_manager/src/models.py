@@ -86,8 +86,25 @@ class WorshipSong:
 class WorshipPerson:
     id: Optional[int] = None
     name: str = ""
+    phone: str = ""
+    email: str = ""
+    status: str = "ativo"
+    primary_roles: str = ""
+    secondary_roles: str = ""
+    instruments: str = ""
+    voice: str = ""
+    availability: str = ""
+    experience_level: str = ""
+    notes: str = ""
     active: int = 1
     created_at: str = ""
+    updated_at: str = ""
+
+    def to_db_dict(self, include_id: bool = False) -> Dict[str, Any]:
+        data = asdict(self)
+        if not include_id:
+            data.pop("id", None)
+        return data
 
     @classmethod
     def from_row(cls, row: Any) -> "WorshipPerson":
@@ -136,6 +153,7 @@ BULLETIN_DB_FIELDS = [name for name in BULLETIN_FIELDS if name != "id"]
 SCHEDULE_FIELDS = [field.name for field in fields(LouveAppSchedule)]
 SCHEDULE_DB_FIELDS = [name for name in SCHEDULE_FIELDS if name != "id"]
 PERSON_FIELDS = [field.name for field in fields(WorshipPerson)]
+PERSON_DB_FIELDS = [name for name in PERSON_FIELDS if name != "id"]
 
 
 def dataclasses_to_dicts(items: Iterable[Any]) -> list[dict[str, Any]]:
