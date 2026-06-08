@@ -7,11 +7,11 @@ from src.config import get_headless, get_slow_mo_ms, validate_louveapp_credentia
 from src.database import Database
 from src.logger import get_logger
 from src.louveapp_browser import (
-    LouveAppBrowserSession,
     ProgressCallback,
     fetch_remaining_schedule_pages,
     save_debug_artifacts,
 )
+from src.louveapp_robust_session import LouveAppRobustBrowserSession
 from src.louveapp_scraper import parse_louveapp_api_schedule_records, scrape_louveapp_schedules
 from src.models import ImportResult
 from src.parser import dedupe_schedules
@@ -105,7 +105,7 @@ def import_louveapp_schedules(progress: ProgressCallback = None, clear_existing:
     logger.info("Inicio da importacao LouveApp com navegacao ativa")
     database = Database()
     email, password = validate_louveapp_credentials()
-    session = LouveAppBrowserSession(email, password, get_headless(), get_slow_mo_ms())
+    session = LouveAppRobustBrowserSession(email, password, get_headless(), get_slow_mo_ms())
     api_records: list[dict] = []
     try:
         page = session.start()
