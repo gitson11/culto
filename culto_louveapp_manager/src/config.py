@@ -16,6 +16,7 @@ DATA_DIR = BASE_DIR / "data"
 OUTPUT_DIR = BASE_DIR / "output"
 DEBUG_DIR = DATA_DIR / "debug"
 LEGACY_DIR = BASE_DIR / "legacy"
+TEMPLATES_DIR = BASE_DIR / "templates"
 DB_PATH = DATA_DIR / "culto_louveapp.sqlite3"
 LEGACY_XLSM_PATH = LEGACY_DIR / "BOLETIM_VBA_CORRIGIDO.xlsm"
 ENV_PATH = BASE_DIR / ".env"
@@ -28,7 +29,7 @@ class ConfigError(RuntimeError):
 
 
 def ensure_directories() -> None:
-    for directory in (DATA_DIR, OUTPUT_DIR, DEBUG_DIR, LEGACY_DIR):
+    for directory in (DATA_DIR, OUTPUT_DIR, DEBUG_DIR, LEGACY_DIR, TEMPLATES_DIR):
         directory.mkdir(parents=True, exist_ok=True)
 
 
