@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from pathlib import Path
 import re
 
 from docx import Document
 from docx.document import Document as DocumentObject
 from docx.text.paragraph import Paragraph
-from docx.text.run import Run
 
 from src.config import OUTPUT_DIR, TEMPLATES_DIR
 from src.database import Database
@@ -131,15 +129,6 @@ def _paragraph_text(paragraph: Paragraph) -> str:
     return "".join(run.text for run in paragraph.runs)
 
 
-def _copy_run_style(source: Run, target: Run) -> None:
-    try:
-        if source._r.rPr is not None:
-            target._r.get_or_add_rPr().append(deepcopy(source._r.rPr))
-    except Exception:
-        # Se a copia XML falhar, o texto ainda sera substituido corretamente.
-        pass
-
-
 def _replace_in_paragraph(paragraph: Paragraph, mapping: dict[str, str]) -> None:
     if not paragraph.runs:
         return
@@ -155,7 +144,6 @@ def _replace_in_paragraph(paragraph: Paragraph, mapping: dict[str, str]) -> None
     for run in paragraph.runs:
         run.text = ""
     first_run.text = new_text
-    _copy_run_style(paragraph.runs[0], first_run)
 
 
 def _iter_table_paragraphs(container) -> list[Paragraph]:
