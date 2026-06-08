@@ -22,12 +22,14 @@ from src.logger import LOG_PATH, get_logger
 from src.louveapp_browser import import_louveapp_schedules
 from src.models import ImportResult, WorshipBulletin, WorshipPerson
 from src.repertoire import generate_repertoire_by_date, generate_repertoire_docx
+from src.scale_models_view import ScaleModelsView
 
 logger = get_logger(__name__)
 
 TAB_DASHBOARD = "Painel"
 TAB_BULLETINS = "Boletins"
 TAB_SCHEDULES = "Escalas"
+TAB_SCALE_MODELS = "Modelos"
 TAB_LEGACY = "Excel Legado"
 TAB_PEOPLE = "Ministerio"
 TAB_EXPORTS = "Exportacoes"
@@ -119,11 +121,12 @@ class CultoLouveAppManager(ctk.CTk):
 
         self.tabs = ctk.CTkTabview(self)
         self.tabs.pack(fill="both", expand=True, padx=12, pady=12)
-        for tab_name in (TAB_DASHBOARD, TAB_BULLETINS, TAB_SCHEDULES, TAB_LEGACY, TAB_PEOPLE, TAB_EXPORTS, TAB_LOGS):
+        for tab_name in (TAB_DASHBOARD, TAB_BULLETINS, TAB_SCHEDULES, TAB_SCALE_MODELS, TAB_LEGACY, TAB_PEOPLE, TAB_EXPORTS, TAB_LOGS):
             self.tabs.add(tab_name)
         self._build_dashboard_tab()
         self._build_bulletins_tab()
         self._build_louveapp_tab()
+        self._build_scale_models_tab()
         self._build_legacy_tab()
         self._build_people_tab()
         self._build_exports_tab()
@@ -213,6 +216,9 @@ class CultoLouveAppManager(ctk.CTk):
         ctk.CTkButton(search_bar, text="Buscar", width=100, command=self._refresh_schedules).grid(row=0, column=1)
         tree_frame, self.schedules_tree = self._make_tree(tab, ("id", "date", "time", "ministry", "role", "person", "title"), {"id": "ID", "date": "Data", "time": "Hora", "ministry": "Ministerio", "role": "Funcao", "person": "Pessoa", "title": "Titulo"}, {"id": 50, "date": 90, "time": 70, "ministry": 120, "role": 120, "person": 150, "title": 260})
         tree_frame.grid(row=2, column=0, sticky="nsew", padx=12, pady=(4, 12))
+
+    def _build_scale_models_tab(self) -> None:
+        self.scale_models_view = ScaleModelsView(self.tabs.tab(TAB_SCALE_MODELS))
 
     def _build_legacy_tab(self) -> None:
         tab = self.tabs.tab(TAB_LEGACY)
@@ -323,6 +329,8 @@ class CultoLouveAppManager(ctk.CTk):
 
     def refresh_all(self) -> None:
         self._refresh_dashboard(); self._refresh_bulletins(); self._refresh_people(); self._refresh_schedules(); self._refresh_template_options(); self._refresh_logs()
+        if hasattr(self, "scale_models_view"):
+            self.scale_models_view.refresh()
 
     def _refresh_dashboard(self) -> None:
         stats = self.db.get_dashboard_stats()
