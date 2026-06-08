@@ -1,16 +1,4 @@
-from src.config import APP_NAME
-from src.database import initialize_database
-from src.gui import CultoLouveAppManager
-from src.logger import get_logger, setup_logging
-
-
-def main() -> None:
-    setup_logging()
-    logger = get_logger(__name__)
-    logger.info("Abrindo %s", APP_NAME)
-    initialize_database()
-    app = CultoLouveAppManager()
-    app.mainloop()
+from main_louveapp_corrigido import main
 
 
 if __name__ == "__main__":
