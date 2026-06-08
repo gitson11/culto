@@ -8,6 +8,11 @@ from typing import Tuple
 from dotenv import load_dotenv
 
 
+APP_NAME = "Ordem Liturgica"
+APP_SUBTITLE = "Gestao de boletins, escalas e repertorios do culto"
+APP_TAGLINE = "Decencia e ordem no servico cristao"
+APP_REFERENCE = "1 Corintios 14:40"
+
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).resolve().parent
 else:
@@ -17,7 +22,12 @@ OUTPUT_DIR = BASE_DIR / "output"
 DEBUG_DIR = DATA_DIR / "debug"
 LEGACY_DIR = BASE_DIR / "legacy"
 TEMPLATES_DIR = BASE_DIR / "templates"
-DB_PATH = DATA_DIR / "culto_louveapp.sqlite3"
+ASSETS_DIR = BASE_DIR / "assets"
+
+PRIMARY_DB_PATH = DATA_DIR / "ordem_liturgica.sqlite3"
+LEGACY_DB_PATH = DATA_DIR / "culto_louveapp.sqlite3"
+DB_PATH = LEGACY_DB_PATH if LEGACY_DB_PATH.exists() and not PRIMARY_DB_PATH.exists() else PRIMARY_DB_PATH
+
 LEGACY_XLSM_PATH = LEGACY_DIR / "BOLETIM_VBA_CORRIGIDO.xlsm"
 ENV_PATH = BASE_DIR / ".env"
 
@@ -29,7 +39,7 @@ class ConfigError(RuntimeError):
 
 
 def ensure_directories() -> None:
-    for directory in (DATA_DIR, OUTPUT_DIR, DEBUG_DIR, LEGACY_DIR, TEMPLATES_DIR):
+    for directory in (DATA_DIR, OUTPUT_DIR, DEBUG_DIR, LEGACY_DIR, TEMPLATES_DIR, ASSETS_DIR):
         directory.mkdir(parents=True, exist_ok=True)
 
 
