@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from contextlib import closing
-import json
 import sqlite3
 from typing import Iterable, Optional
 
@@ -9,6 +8,7 @@ from src.config import DB_PATH, ensure_directories
 from src.logger import get_logger
 from src.models import (
     BULLETIN_DB_FIELDS,
+    PERSON_DB_FIELDS,
     SCHEDULE_DB_FIELDS,
     ImportResult,
     LouveAppSchedule,
@@ -75,6 +75,38 @@ BULLETIN_COLUMNS_SQL = """
     updated_at TEXT
 """
 
+PEOPLE_COLUMNS_SQL = """
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE,
+    phone TEXT,
+    email TEXT,
+    status TEXT DEFAULT 'ativo',
+    primary_roles TEXT,
+    secondary_roles TEXT,
+    instruments TEXT,
+    voice TEXT,
+    availability TEXT,
+    experience_level TEXT,
+    notes TEXT,
+    active INTEGER DEFAULT 1,
+    created_at TEXT,
+    updated_at TEXT
+"""
+
+PEOPLE_EXTRA_COLUMNS = {
+    "phone": "TEXT",
+    "email": "TEXT",
+    "status": "TEXT DEFAULT 'ativo'",
+    "primary_roles": "TEXT",
+    "secondary_roles": "TEXT",
+    "instruments": "TEXT",
+    "voice": "TEXT",
+    "availability": "TEXT",
+    "experience_level": "TEXT",
+    "notes": "TEXT",
+    "updated_at": "TEXT",
+}
+
 
 def get_connection() -> sqlite3.Connection:
     ensure_directories()
@@ -91,16 +123,8 @@ class Database:
     def create_tables(self) -> None:
         with closing(get_connection()) as connection, connection:
             connection.execute(f"CREATE TABLE IF NOT EXISTS worship_bulletins ({BULLETIN_COLUMNS_SQL})")
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS worship_people (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT UNIQUE,
-                    active INTEGER DEFAULT 1,
-                    created_at TEXT
-                )
-                """
-            )
+            connection.execute(f"CREATE TABLE IF NOT EXISTS worship_people ({PEOPLE_COLUMNS_SQL})")
+            self._migrate_people_table(connection)
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS louveapp_schedules (
@@ -133,8 +157,19 @@ class Database:
             )
             connection.execute("CREATE INDEX IF NOT EXISTS idx_bulletins_date ON worship_bulletins(date_text)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_people_name ON worship_people(name)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_people_status ON worship_people(status)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_schedules_date ON louveapp_schedules(date_text)")
         logger.info("Banco SQLite pronto em %s", DB_PATH)
+
+    def _migrate_people_table(self, connection: sqlite3.Connection) -> None:
+        existing_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(worship_people)").fetchall()
+        }
+        for column, sql_type in PEOPLE_EXTRA_COLUMNS.items():
+            if column not in existing_columns:
+                connection.execute(f"ALTER TABLE worship_people ADD COLUMN {column} {sql_type}")
+        if "status" not in existing_columns:
+            connection.execute("UPDATE worship_people SET status = 'ativo' WHERE status IS NULL OR status = ''")
 
     def insert_bulletin(self, bulletin: WorshipBulletin) -> int:
         current_time = now_text()
@@ -170,23 +205,16 @@ class Database:
         data["id"] = bulletin_id
         try:
             with closing(get_connection()) as connection, connection:
-                connection.execute(
-                    f"UPDATE worship_bulletins SET {assignments} WHERE id = :id",
-                    data,
-                )
+                connection.execute(f"UPDATE worship_bulletins SET {assignments} WHERE id = :id", data)
             logger.info("Boletim atualizado: id=%s", bulletin_id)
         except sqlite3.Error:
             logger.exception("Erro ao atualizar boletim")
             raise
 
     def delete_bulletin(self, bulletin_id: int) -> None:
-        try:
-            with closing(get_connection()) as connection, connection:
-                connection.execute("DELETE FROM worship_bulletins WHERE id = ?", (bulletin_id,))
-            logger.info("Boletim excluido: id=%s", bulletin_id)
-        except sqlite3.Error:
-            logger.exception("Erro ao excluir boletim")
-            raise
+        with closing(get_connection()) as connection, connection:
+            connection.execute("DELETE FROM worship_bulletins WHERE id = ?", (bulletin_id,))
+        logger.info("Boletim excluido: id=%s", bulletin_id)
 
     def get_bulletin(self, bulletin_id: int) -> Optional[WorshipBulletin]:
         with closing(get_connection()) as connection:
@@ -228,53 +256,77 @@ class Database:
             ).fetchone()
         return row is not None
 
-    def save_person(self, name: str, active: int = 1) -> Optional[int]:
-        clean_name = " ".join((name or "").strip().split())
-        if not clean_name:
-            return None
+    def _normalize_person(self, person_or_name: WorshipPerson | str, active: int = 1) -> WorshipPerson:
+        if isinstance(person_or_name, WorshipPerson):
+            person = person_or_name
+        else:
+            person = WorshipPerson(name=str(person_or_name or ""), active=active)
+        person.name = " ".join((person.name or "").strip().split())
+        if not person.name:
+            raise ValueError("Nome nao pode ficar vazio.")
+        if not person.status:
+            person.status = "ativo" if person.active else "inativo"
+        person.active = 0 if person.status.casefold() in {"inativo", "afastado"} else int(person.active or 1)
+        return person
+
+    def save_person(self, person_or_name: WorshipPerson | str, active: int = 1) -> Optional[int]:
+        person = self._normalize_person(person_or_name, active=active)
         current_time = now_text()
+        if not person.created_at:
+            person.created_at = current_time
+        person.updated_at = current_time
+        data = person.to_db_dict()
+        columns = ", ".join(PERSON_DB_FIELDS)
+        placeholders = ", ".join([f":{field}" for field in PERSON_DB_FIELDS])
+        updates = ", ".join([
+            f"{field} = excluded.{field}"
+            for field in PERSON_DB_FIELDS
+            if field not in {"created_at"}
+        ])
         try:
             with closing(get_connection()) as connection, connection:
                 connection.execute(
-                    """
-                    INSERT INTO worship_people(name, active, created_at)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(name) DO UPDATE SET active = excluded.active
-                    """,
-                    (clean_name, active, current_time),
+                    f"INSERT INTO worship_people ({columns}) VALUES ({placeholders}) ON CONFLICT(name) DO UPDATE SET {updates}",
+                    data,
                 )
-                row = connection.execute("SELECT id FROM worship_people WHERE name = ?", (clean_name,)).fetchone()
+                row = connection.execute("SELECT id FROM worship_people WHERE name = ?", (person.name,)).fetchone()
+            logger.info("Integrante salvo: %s", person.name)
             return int(row["id"]) if row else None
         except sqlite3.Error:
-            logger.exception("Erro ao salvar pessoa do louvor")
+            logger.exception("Erro ao salvar integrante")
             raise
 
-    def update_person(self, person_id: int, name: str, active: int = 1) -> None:
-        clean_name = " ".join((name or "").strip().split())
-        if not clean_name:
-            raise ValueError("Nome nao pode ficar vazio.")
-        try:
-            with closing(get_connection()) as connection, connection:
-                connection.execute(
-                    "UPDATE worship_people SET name = ?, active = ? WHERE id = ?",
-                    (clean_name, active, person_id),
-                )
-            logger.info("Pessoa do louvor atualizada: id=%s", person_id)
-        except sqlite3.Error:
-            logger.exception("Erro ao atualizar pessoa do louvor")
-            raise
+    def update_person(self, person_id: int, person_or_name: WorshipPerson | str, active: int = 1) -> None:
+        person = self._normalize_person(person_or_name, active=active)
+        person.id = person_id
+        person.updated_at = now_text()
+        data = person.to_db_dict()
+        data["id"] = person_id
+        assignments = ", ".join([f"{field} = :{field}" for field in PERSON_DB_FIELDS if field != "created_at"])
+        with closing(get_connection()) as connection, connection:
+            connection.execute(f"UPDATE worship_people SET {assignments} WHERE id = :id", data)
+        logger.info("Integrante atualizado: id=%s", person_id)
 
     def inactivate_person(self, person_id: int) -> None:
         with closing(get_connection()) as connection, connection:
-            connection.execute("UPDATE worship_people SET active = 0 WHERE id = ?", (person_id,))
-        logger.info("Pessoa do louvor inativada: id=%s", person_id)
+            connection.execute(
+                "UPDATE worship_people SET active = 0, status = 'inativo', updated_at = ? WHERE id = ?",
+                (now_text(), person_id),
+            )
+        logger.info("Integrante inativado: id=%s", person_id)
 
     def list_people(self, search: str = "", active_only: bool = False) -> list[WorshipPerson]:
         clauses = []
         params: list[object] = []
         if search.strip():
-            clauses.append("name LIKE ?")
-            params.append(f"%{search.strip()}%")
+            query = f"%{search.strip()}%"
+            clauses.append(
+                """
+                (name LIKE ? OR phone LIKE ? OR email LIKE ? OR primary_roles LIKE ? OR secondary_roles LIKE ?
+                 OR instruments LIKE ? OR voice LIKE ? OR availability LIKE ? OR status LIKE ? OR notes LIKE ?)
+                """
+            )
+            params.extend([query] * 10)
         if active_only:
             clauses.append("active = 1")
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
@@ -284,6 +336,11 @@ class Database:
                 params,
             ).fetchall()
         return [WorshipPerson.from_row(row) for row in rows]
+
+    def get_person(self, person_id: int) -> Optional[WorshipPerson]:
+        with closing(get_connection()) as connection:
+            row = connection.execute("SELECT * FROM worship_people WHERE id = ?", (person_id,)).fetchone()
+        return WorshipPerson.from_row(row) if row else None
 
     def schedule_exists(self, schedule: LouveAppSchedule) -> bool:
         with closing(get_connection()) as connection:
@@ -297,13 +354,7 @@ class Database:
                   AND COALESCE(person_name, '') = ?
                 LIMIT 1
                 """,
-                (
-                    schedule.raw_text,
-                    schedule.page_url,
-                    schedule.date_text,
-                    schedule.time_text,
-                    schedule.person_name,
-                ),
+                (schedule.raw_text, schedule.page_url, schedule.date_text, schedule.time_text, schedule.person_name),
             ).fetchone()
         return row is not None
 
@@ -326,28 +377,16 @@ class Database:
                 """
             ).fetchall()
         return {
-            (
-                row["category"] or "",
-                row["date_text"] or "",
-                row["time_text"] or "",
-                row["role"] or "",
-                row["person_name"] or "",
-                row["raw_json"] or row["raw_text"] or "",
-            )
+            (row["category"] or "", row["date_text"] or "", row["time_text"] or "", row["role"] or "", row["person_name"] or "", row["raw_json"] or row["raw_text"] or "")
             for row in rows
         }
 
-    def save_louveapp_schedules(
-        self,
-        schedules: Iterable[LouveAppSchedule],
-        clear_existing: bool = False,
-    ) -> ImportResult:
+    def save_louveapp_schedules(self, schedules: Iterable[LouveAppSchedule], clear_existing: bool = False) -> ImportResult:
         imported = 0
         skipped = 0
         if clear_existing:
             self.clear_louveapp_schedules()
         seen_keys = self._existing_schedule_keys()
-
         try:
             with closing(get_connection()) as connection, connection:
                 for schedule in schedules:
@@ -361,10 +400,7 @@ class Database:
                     data = {field: getattr(schedule, field) for field in SCHEDULE_DB_FIELDS}
                     columns = ", ".join(SCHEDULE_DB_FIELDS)
                     placeholders = ", ".join([f":{field}" for field in SCHEDULE_DB_FIELDS])
-                    connection.execute(
-                        f"INSERT INTO louveapp_schedules ({columns}) VALUES ({placeholders})",
-                        data,
-                    )
+                    connection.execute(f"INSERT INTO louveapp_schedules ({columns}) VALUES ({placeholders})", data)
                     imported += 1
             message = f"{imported} escala(s) importada(s), {skipped} duplicata(s) ignorada(s)."
             self.insert_import_log("louveapp", "success", message)
@@ -392,167 +428,8 @@ class Database:
             """
             params = [query] * 7
         with closing(get_connection()) as connection:
-            rows = connection.execute(
-                f"SELECT * FROM louveapp_schedules {where} ORDER BY id DESC",
-                params,
-            ).fetchall()
+            rows = connection.execute(f"SELECT * FROM louveapp_schedules {where} ORDER BY id DESC", params).fetchall()
         return [LouveAppSchedule.from_row(row) for row in rows]
-
-    def list_louveapp_schedule_summaries(self) -> list[dict[str, str]]:
-        with closing(get_connection()) as connection:
-            summary_rows = connection.execute(
-                """
-                SELECT id, title, date_text, time_text, ministry, raw_json
-                FROM louveapp_schedules
-                WHERE category = 'api_schedule'
-                ORDER BY id DESC
-                """
-            ).fetchall()
-            song_rows = connection.execute(
-                """
-                SELECT raw_json
-                FROM louveapp_schedules
-                WHERE category = 'api_schedule_song'
-                """
-            ).fetchall()
-
-        song_counts: dict[str, set[tuple[str, str, str, str]]] = {}
-        for row in song_rows:
-            try:
-                payload = json.loads(row["raw_json"] or "{}")
-            except json.JSONDecodeError:
-                continue
-            schedule_id = str(payload.get("schedule_id") or "")
-            song = payload.get("song") if isinstance(payload.get("song"), dict) else {}
-            title = str(song.get("title") or "").strip()
-            artist = str(song.get("artist") or "").strip()
-            key = str(song.get("key") or "").strip()
-            version = str(song.get("version") or "").strip()
-            if schedule_id and title:
-                song_counts.setdefault(schedule_id, set()).add(
-                    (title.casefold(), artist.casefold(), key.casefold(), version.casefold())
-                )
-
-        summaries: list[dict[str, str]] = []
-        seen: set[str] = set()
-        for row in summary_rows:
-            try:
-                payload = json.loads(row["raw_json"] or "{}")
-            except json.JSONDecodeError:
-                payload = {}
-            external_id = str(payload.get("_id") or "")
-            if not external_id or external_id in seen:
-                continue
-            seen.add(external_id)
-            song_count = len(song_counts.get(external_id, set()))
-            label = f"{row['date_text']} {row['time_text']} - {row['title']} ({row['ministry']}) - {song_count} musica(s)"
-            summaries.append(
-                {
-                    "db_id": str(row["id"]),
-                    "external_id": external_id,
-                    "label": label,
-                    "title": row["title"] or "",
-                    "date_text": row["date_text"] or "",
-                    "time_text": row["time_text"] or "",
-                    "ministry": row["ministry"] or "",
-                    "song_count": str(song_count),
-                }
-            )
-        return summaries
-
-    def list_louveapp_schedule_songs(self, external_schedule_id: str) -> list[dict[str, str]]:
-        if not external_schedule_id:
-            return []
-        with closing(get_connection()) as connection:
-            rows = connection.execute(
-                """
-                SELECT raw_json
-                FROM louveapp_schedules
-                WHERE category = 'api_schedule_song'
-                ORDER BY id ASC
-                """
-            ).fetchall()
-            schedule_row = connection.execute(
-                """
-                SELECT raw_json
-                FROM louveapp_schedules
-                WHERE category = 'api_schedule'
-                ORDER BY id DESC
-                """
-            ).fetchall()
-
-        songs: list[dict[str, str]] = []
-        seen: set[tuple[str, str, str, str]] = set()
-        artist_lookup = self._artist_lookup_for_schedule(schedule_row, external_schedule_id)
-        for row in rows:
-            try:
-                payload = json.loads(row["raw_json"] or "{}")
-            except json.JSONDecodeError:
-                continue
-            if str(payload.get("schedule_id") or "") != external_schedule_id:
-                continue
-            song = payload.get("song") if isinstance(payload.get("song"), dict) else {}
-            title = str(song.get("title") or "").strip()
-            artist = str(song.get("artist") or "").strip()
-            key = str(song.get("key") or "").strip()
-            version = str(song.get("version") or "").strip()
-            if not title:
-                continue
-            if not artist:
-                artist = artist_lookup.get((title.casefold(), key.casefold(), version.casefold()), "")
-                if not artist:
-                    artist = artist_lookup.get((title.casefold(), "", version.casefold()), "")
-                if not artist:
-                    artist = artist_lookup.get((title.casefold(), key.casefold(), ""), "")
-                if not artist:
-                    artist = artist_lookup.get((title.casefold(), "", ""), "")
-            dedupe_key = (title.casefold(), artist.casefold(), key.casefold(), version.casefold())
-            if dedupe_key in seen:
-                continue
-            seen.add(dedupe_key)
-            display_parts = [title]
-            if artist:
-                display_parts.append(artist)
-            if key:
-                display_parts.append(f"Tom: {key}")
-            display = " | ".join(display_parts)
-            songs.append({"title": title, "artist": artist, "key": key, "version": version, "display": display})
-        return songs
-
-    def _artist_lookup_for_schedule(self, schedule_rows: list[sqlite3.Row], external_schedule_id: str) -> dict[tuple[str, str, str], str]:
-        lookup: dict[tuple[str, str, str], str] = {}
-        for row in schedule_rows:
-            try:
-                payload = json.loads(row["raw_json"] or "{}")
-            except json.JSONDecodeError:
-                continue
-            if str(payload.get("_id") or "") != external_schedule_id:
-                continue
-            for entry in payload.get("musicasEscala") or []:
-                if not isinstance(entry, dict):
-                    continue
-                music = entry.get("musica") if isinstance(entry.get("musica"), dict) else {}
-                original = music.get("musicaOriginal") if isinstance(music.get("musicaOriginal"), dict) else {}
-                artist = original.get("artista") if isinstance(original.get("artista"), dict) else {}
-                title = str(original.get("nome") or music.get("nome") or "").strip()
-                artist_name = str(artist.get("nome") or "").strip()
-                version_id = str(entry.get("versao") or "")
-                versions = music.get("versoes") if isinstance(music.get("versoes"), list) else []
-                version = {}
-                for candidate in versions:
-                    if isinstance(candidate, dict) and str(candidate.get("_id") or "") == version_id:
-                        version = candidate
-                        break
-                if not version and versions and isinstance(versions[0], dict):
-                    version = versions[0]
-                key = str(version.get("tom") or "").strip() if version else ""
-                version_name = str(version.get("nomeVersao") or "").strip() if version else ""
-                if title and artist_name:
-                    lookup[(title.casefold(), key.casefold(), version_name.casefold())] = artist_name
-                    lookup[(title.casefold(), key.casefold(), "")] = artist_name
-                    lookup[(title.casefold(), "", version_name.casefold())] = artist_name
-                    lookup[(title.casefold(), "", "")] = artist_name
-        return lookup
 
     def insert_import_log(self, source: str, status: str, message: str) -> None:
         with closing(get_connection()) as connection, connection:
@@ -563,10 +440,7 @@ class Database:
 
     def list_import_logs(self, limit: int = 100) -> list[dict]:
         with closing(get_connection()) as connection:
-            rows = connection.execute(
-                "SELECT * FROM import_logs ORDER BY id DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+            rows = connection.execute("SELECT * FROM import_logs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
         return [dict(row) for row in rows]
 
     def get_dashboard_stats(self) -> dict[str, object]:
@@ -574,12 +448,8 @@ class Database:
             bulletins = connection.execute("SELECT COUNT(*) AS total FROM worship_bulletins").fetchone()["total"]
             people = connection.execute("SELECT COUNT(*) AS total FROM worship_people WHERE active = 1").fetchone()["total"]
             schedules = connection.execute("SELECT COUNT(*) AS total FROM louveapp_schedules").fetchone()["total"]
-            last_bulletin = connection.execute(
-                "SELECT date_text, dirigente, pregador FROM worship_bulletins ORDER BY id DESC LIMIT 1"
-            ).fetchone()
-            last_import = connection.execute(
-                "SELECT source, status, message, created_at FROM import_logs ORDER BY id DESC LIMIT 1"
-            ).fetchone()
+            last_bulletin = connection.execute("SELECT date_text, dirigente, pregador FROM worship_bulletins ORDER BY id DESC LIMIT 1").fetchone()
+            last_import = connection.execute("SELECT source, status, message, created_at FROM import_logs ORDER BY id DESC LIMIT 1").fetchone()
         return {
             "bulletins": bulletins,
             "people": people,
