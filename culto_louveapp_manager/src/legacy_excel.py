@@ -1,293 +1,248 @@
-"""Importação do arquivo Excel legado (BOLETIM_VBA_CORRIGIDO.xlsm).
-
-Lê dados das abas Planilha1/CULTOS e LOUVOR/INTEGRANTES.
-Nunca executa macros VBA — apenas leitura de dados.
-"""
-
 from __future__ import annotations
 
 import json
+import re
+import zipfile
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
 
 from openpyxl import load_workbook
 
-from src.config import LEGACY_DIR, get_legacy_xlsm_path
-from src.database import insert_bulletin, insert_person, log_import
+from src.config import LEGACY_DIR, LEGACY_XLSM_PATH
+from src.database import Database
 from src.logger import get_logger
 from src.models import ImportResult, WorshipBulletin
 
-logger = get_logger()
 
-# Mapeamento de colunas A:AT (índice 0-based) para campos do WorshipBulletin
-_COLUMN_MAP: list[tuple[int, str]] = [
-    (0, "date_text"),
-    (1, "dirigente"),
-    (2, "preludio_musica"),
-    (3, "preludio_cantor"),
-    (4, "preludio_tom"),
-    (5, "ref1"),
-    (6, "texto1"),
-    (7, "musica1"),
-    (8, "cantor1"),
-    (9, "tom1"),
-    (10, "ref2"),
-    (11, "texto2"),
-    (12, "musica2"),
-    (13, "cantor2"),
-    (14, "tom2"),
-    (15, "ref3"),
-    (16, "texto3"),
-    (17, "musica3"),
-    (18, "cantor3"),
-    (19, "tom3"),
-    (20, "oracao_louvor"),
-    (21, "ref_louvor"),
-    (22, "texto_louvor"),
-    (23, "ofertas_ref"),
-    (24, "ofertas_texto"),
-    (25, "ofertas_oracao"),
-    (26, "musica4"),
-    (27, "cantor4"),
-    (28, "tom4"),
-    (29, "musica5"),
-    (30, "cantor5"),
-    (31, "tom5"),
-    (32, "oracao_intercessao"),
-    (33, "pregador"),
-    (34, "musica_pao"),
-    (35, "cantor_pao"),
-    (36, "tom_pao"),
-    (37, "musica_vinho"),
-    (38, "cantor_vinho"),
-    (39, "tom_vinho"),
-    (40, "musica_extra"),
-    (41, "cantor_extra"),
-    (42, "tom_extra"),
-    (43, "musica_final"),
-    (44, "cantor_final"),
-    (45, "tom_final"),
-]
+logger = get_logger(__name__)
 
 
-def _safe_str(value: Any) -> str:
-    """Converte valor de célula para string, preservando quebras de linha."""
+LEGACY_COLUMN_MAP = {
+    1: "date_text",
+    2: "dirigente",
+    3: "preludio_musica",
+    4: "preludio_cantor",
+    5: "preludio_tom",
+    6: "ref1",
+    7: "texto1",
+    8: "musica1",
+    9: "cantor1",
+    10: "tom1",
+    11: "ref2",
+    12: "texto2",
+    13: "musica2",
+    14: "cantor2",
+    15: "tom2",
+    16: "ref3",
+    17: "texto3",
+    18: "musica3",
+    19: "cantor3",
+    20: "tom3",
+    21: "oracao_louvor",
+    22: "ref_louvor",
+    23: "texto_louvor",
+    24: "ofertas_ref",
+    25: "ofertas_texto",
+    26: "ofertas_oracao",
+    27: "musica4",
+    28: "cantor4",
+    29: "tom4",
+    30: "musica5",
+    31: "cantor5",
+    32: "tom5",
+    33: "oracao_intercessao",
+    34: "pregador",
+    35: "musica_pao",
+    36: "cantor_pao",
+    37: "tom_pao",
+    38: "musica_vinho",
+    39: "cantor_vinho",
+    40: "tom_vinho",
+    41: "musica_extra",
+    42: "cantor_extra",
+    43: "tom_extra",
+    44: "musica_final",
+    45: "cantor_final",
+    46: "tom_final",
+}
+
+
+def _cell_to_text(value: Any) -> str:
     if value is None:
         return ""
-    s = str(value).strip()
-    # Normaliza marcadores de quebra de linha do Excel
-    s = s.replace("_x000D_\n", "\n").replace("_x000D_", "\n")
-    return s
+    if isinstance(value, datetime):
+        return value.strftime("%d/%m/%Y")
+    if isinstance(value, date):
+        return value.strftime("%d/%m/%Y")
+    return str(value).strip()
 
 
-def find_legacy_file() -> Optional[Path]:
-    """Procura o arquivo XLSM legado na pasta legacy/."""
-    return get_legacy_xlsm_path()
-
-
-def inspect_legacy_workbook(path: Path) -> dict[str, Any]:
-    """Inspeciona o workbook e retorna informações sobre abas e cabeçalhos."""
-    logger.info("Inspecionando arquivo legado: %s", path.name)
-    wb = load_workbook(str(path), data_only=True, read_only=True)
-
-    info: dict[str, Any] = {
-        "file_name": path.name,
-        "file_size_kb": path.stat().st_size // 1024,
-        "sheet_names": wb.sheetnames,
-        "data_sheet": None,
-        "people_sheet": None,
-        "data_headers": [],
-        "data_row_count": 0,
-        "people_count": 0,
-    }
-
-    # Encontra aba de dados
-    for name in ("Planilha1", "CULTOS", "Planilha 1"):
-        if name in wb.sheetnames:
-            info["data_sheet"] = name
-            break
-    if not info["data_sheet"] and wb.sheetnames:
-        # Tenta a primeira aba que tenha "DATA" como cabeçalho
-        for name in wb.sheetnames:
-            ws = wb[name]
-            first_row = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
-            if "DATA" in [str(v).upper().strip() for v in first_row if v]:
-                info["data_sheet"] = name
-                break
-
-    # Lê cabeçalhos da aba de dados
-    if info["data_sheet"]:
-        ws = wb[info["data_sheet"]]
-        headers = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
-        info["data_headers"] = [str(h) if h else "" for h in headers]
-        # Conta linhas com data
-        count = 0
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if row and row[0]:
-                count += 1
-        info["data_row_count"] = count
-
-    # Encontra aba de pessoas
-    for name in ("LOUVOR", "INTEGRANTES", "Louvor", "Integrantes"):
-        if name in wb.sheetnames:
-            info["people_sheet"] = name
-            break
-
-    if info["people_sheet"]:
-        ws = wb[info["people_sheet"]]
-        count = 0
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if row and row[0] and str(row[0]).strip():
-                count += 1
-        info["people_count"] = count
-
-    wb.close()
-    logger.info(
-        "Inspeção concluída: abas=%s, dados=%d linhas, pessoas=%d",
-        info["sheet_names"], info["data_row_count"], info["people_count"],
+def find_legacy_file() -> Path:
+    if LEGACY_XLSM_PATH.exists():
+        return LEGACY_XLSM_PATH
+    candidates = [
+        path
+        for path in sorted(LEGACY_DIR.glob("*.xlsm"))
+        if not path.name.lower().startswith("coloque_aqui")
+    ]
+    if candidates:
+        return candidates[0]
+    raise FileNotFoundError(
+        "Arquivo XLSM nao encontrado. Coloque BOLETIM_VBA_CORRIGIDO.xlsm na pasta legacy/."
     )
-    return info
 
 
-def import_legacy_bulletins(path: Path) -> ImportResult:
-    """Importa boletins da aba de dados do XLSM."""
-    result = ImportResult(source="legacy_xlsm")
+def inspect_legacy_workbook(workbook_path: Optional[str | Path] = None) -> dict[str, Any]:
+    path = Path(workbook_path) if workbook_path else find_legacy_file()
+    if not path.exists():
+        raise FileNotFoundError(f"Arquivo XLSM nao encontrado: {path}")
 
     try:
-        info = inspect_legacy_workbook(path)
-        if not info["data_sheet"]:
-            result.status = "error"
-            result.message = "Nenhuma aba de dados encontrada (Planilha1, CULTOS)."
-            log_import(result.source, result.status, result.message)
-            return result
+        workbook = load_workbook(path, keep_vba=True, data_only=True, read_only=True)
+        try:
+            sheets = workbook.sheetnames
+            has_planilha1 = "Planilha1" in sheets
+            has_louvor = "LOUVOR" in sheets
+            headers: list[str] = []
+            max_row = 0
+            max_column = 0
+            if has_planilha1:
+                sheet = workbook["Planilha1"]
+                max_row = sheet.max_row
+                max_column = sheet.max_column
+                headers = [_cell_to_text(sheet.cell(row=1, column=column).value) for column in range(1, 47)]
+            summary = {
+                "path": str(path),
+                "sheets": sheets,
+                "has_planilha1": has_planilha1,
+                "has_louvor": has_louvor,
+                "planilha1_range": f"A1:AT{max_row}" if has_planilha1 else "",
+                "planilha1_max_row": max_row,
+                "planilha1_max_column": max_column,
+                "headers": headers,
+                "vba_summary": try_extract_vba_summary(path),
+            }
+        finally:
+            workbook.close()
+        logger.info("XLSM inspecionado: %s", path)
+        return summary
+    except Exception:
+        logger.exception("Falha ao inspecionar XLSM legado")
+        raise
 
-        wb = load_workbook(str(path), data_only=True, read_only=True)
-        ws = wb[info["data_sheet"]]
 
-        imported = 0
-        errors = []
+def import_legacy_bulletins(workbook_path: Optional[str | Path] = None, db: Optional[Database] = None) -> ImportResult:
+    path = Path(workbook_path) if workbook_path else find_legacy_file()
+    database = db or Database()
+    imported = 0
+    skipped = 0
+    errors: list[str] = []
 
-        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-            if not row or not row[0]:
-                continue  # Ignora linhas sem DATA
+    try:
+        workbook = load_workbook(path, keep_vba=True, data_only=True, read_only=True)
+        try:
+            if "Planilha1" not in workbook.sheetnames:
+                raise ValueError("Aba Planilha1 nao encontrada no arquivo XLSM.")
+            sheet = workbook["Planilha1"]
+            for row_index in range(2, sheet.max_row + 1):
+                values = {
+                    field_name: _cell_to_text(sheet.cell(row=row_index, column=column_index).value)
+                    for column_index, field_name in LEGACY_COLUMN_MAP.items()
+                }
+                if not values["date_text"]:
+                    continue
 
-            try:
-                bulletin = WorshipBulletin(source="legacy_xlsm")
-
-                # Mapeia colunas para campos
-                for col_idx, field_name in _COLUMN_MAP:
-                    value = ""
-                    if col_idx < len(row):
-                        value = _safe_str(row[col_idx])
-                    setattr(bulletin, field_name, value)
-
-                # Salva JSON bruto para referência
-                raw = {}
-                for col_idx, field_name in _COLUMN_MAP:
-                    if col_idx < len(row):
-                        raw[field_name] = _safe_str(row[col_idx])
-                bulletin.raw_json = json.dumps(raw, ensure_ascii=False)
-
-                insert_bulletin(bulletin)
+                legacy_values = {
+                    str(column_index): _cell_to_text(sheet.cell(row=row_index, column=column_index).value)
+                    for column_index in range(1, 47)
+                }
+                raw_json = json.dumps(
+                    {"legacy_file": path.name, "legacy_row": row_index, "values": legacy_values},
+                    ensure_ascii=False,
+                )
+                if database.bulletin_exists("legacy_xlsm", values["date_text"], raw_json):
+                    skipped += 1
+                    continue
+                bulletin = WorshipBulletin(**values, source="legacy_xlsm", raw_json=raw_json)
+                database.insert_bulletin(bulletin)
                 imported += 1
+        finally:
+            workbook.close()
 
-            except Exception as exc:
-                err_msg = f"Linha {row_idx}: {exc}"
-                errors.append(err_msg)
-                logger.warning("Erro ao importar linha %d: %s", row_idx, exc)
-
-        wb.close()
-
-        result.records_count = imported
-        result.errors = errors
-        result.message = f"{imported} boletins importados com sucesso."
-        if errors:
-            result.message += f" {len(errors)} erros."
-        log_import(result.source, result.status, result.message)
-        logger.info("Importação de boletins legados concluída: %d importados", imported)
-
+        message = f"{imported} boletim(ns) importado(s), {skipped} duplicata(s) ignorada(s)."
+        database.insert_import_log("legacy_xlsm", "success", message)
+        logger.info(message)
+        return ImportResult("legacy_xlsm", "success", message, imported, skipped, errors)
     except Exception as exc:
-        result.status = "error"
-        result.message = f"Erro ao importar boletins: {exc}"
-        result.errors.append(str(exc))
-        log_import(result.source, result.status, result.message)
-        logger.error("Falha na importação legada: %s", exc)
-
-    return result
+        logger.exception("Falha ao importar boletins do XLSM legado")
+        message = f"Falha ao importar boletins do XLSM: {exc}"
+        database.insert_import_log("legacy_xlsm", "error", message)
+        return ImportResult("legacy_xlsm", "error", message, imported, skipped, [str(exc)])
 
 
-def import_legacy_people(path: Path) -> ImportResult:
-    """Importa pessoas do louvor da aba LOUVOR/INTEGRANTES."""
-    result = ImportResult(source="legacy_people")
+def import_legacy_people(workbook_path: Optional[str | Path] = None, db: Optional[Database] = None) -> ImportResult:
+    path = Path(workbook_path) if workbook_path else find_legacy_file()
+    database = db or Database()
+    imported = 0
+    skipped = 0
+    errors: list[str] = []
 
     try:
-        wb = load_workbook(str(path), data_only=True, read_only=True)
-
-        # Encontra a aba
-        people_sheet = None
-        for name in ("LOUVOR", "INTEGRANTES", "Louvor", "Integrantes"):
-            if name in wb.sheetnames:
-                people_sheet = name
-                break
-
-        if not people_sheet:
-            result.status = "error"
-            result.message = "Nenhuma aba de pessoas encontrada (LOUVOR, INTEGRANTES)."
-            wb.close()
-            log_import(result.source, result.status, result.message)
-            return result
-
-        ws = wb[people_sheet]
-        imported = 0
-
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row or not row[0]:
-                continue
-            name = str(row[0]).strip()
-            if name and name.upper() != "NOME":
-                insert_person(name)
+        workbook = load_workbook(path, keep_vba=True, data_only=True, read_only=True)
+        try:
+            if "LOUVOR" not in workbook.sheetnames:
+                raise ValueError("Aba LOUVOR nao encontrada no arquivo XLSM.")
+            sheet = workbook["LOUVOR"]
+            existing = {person.name.casefold() for person in database.list_people()}
+            for row_index in range(2, sheet.max_row + 1):
+                name = _cell_to_text(sheet.cell(row=row_index, column=1).value)
+                if not name:
+                    continue
+                if name.casefold() in existing:
+                    skipped += 1
+                    continue
+                database.save_person(name)
+                existing.add(name.casefold())
                 imported += 1
+        finally:
+            workbook.close()
 
-        wb.close()
-
-        result.records_count = imported
-        result.message = f"{imported} pessoas importadas."
-        log_import(result.source, result.status, result.message)
-        logger.info("Importação de pessoas legadas concluída: %d", imported)
-
+        message = f"{imported} pessoa(s) importada(s), {skipped} duplicata(s) ignorada(s)."
+        database.insert_import_log("legacy_xlsm", "success", message)
+        logger.info(message)
+        return ImportResult("legacy_xlsm", "success", message, imported, skipped, errors)
     except Exception as exc:
-        result.status = "error"
-        result.message = f"Erro ao importar pessoas: {exc}"
-        result.errors.append(str(exc))
-        log_import(result.source, result.status, result.message)
-        logger.error("Falha na importação de pessoas: %s", exc)
-
-    return result
+        logger.exception("Falha ao importar pessoas do XLSM legado")
+        message = f"Falha ao importar pessoas do louvor: {exc}"
+        database.insert_import_log("legacy_xlsm", "error", message)
+        return ImportResult("legacy_xlsm", "error", message, imported, skipped, [str(exc)])
 
 
-def try_extract_vba_summary(path: Path) -> str:
-    """Tenta extrair resumo das macros VBA (sem executá-las)."""
-    summary_lines = ["=== Resumo VBA ===", f"Arquivo: {path.name}", ""]
-
+def try_extract_vba_summary(workbook_path: Optional[str | Path] = None) -> dict[str, Any]:
+    path = Path(workbook_path) if workbook_path else find_legacy_file()
+    summary = {"has_vba_project": False, "macro_like_names": [], "strings": []}
     try:
-        import oletools.olevba as olevba
-
-        vba_parser = olevba.VBA_Parser(str(path))
-        if vba_parser.detect_vba_macros():
-            summary_lines.append("Macros VBA detectadas:")
-            for vba_filename, stream_path, vba_code_type, vba_code in vba_parser.extract_macros():
-                summary_lines.append(f"  - {vba_filename} ({vba_code_type})")
-                # Extrai nomes de Sub/Function
-                for line in vba_code.split("\n"):
-                    stripped = line.strip()
-                    if stripped.startswith(("Sub ", "Function ", "Private Sub ", "Private Function ")):
-                        summary_lines.append(f"    → {stripped.split('(')[0]}")
-        else:
-            summary_lines.append("Nenhuma macro VBA encontrada.")
-        vba_parser.close()
-    except ImportError:
-        summary_lines.append("oletools não instalado. Instale com: pip install oletools")
+        with zipfile.ZipFile(path) as archive:
+            names = archive.namelist()
+            if "xl/vbaProject.bin" not in names:
+                return summary
+            summary["has_vba_project"] = True
+            data = archive.read("xl/vbaProject.bin")
     except Exception as exc:
-        summary_lines.append(f"Erro ao ler VBA: {exc}")
+        summary["error"] = str(exc)
+        return summary
 
-    return "\n".join(summary_lines)
+    ascii_strings = [
+        item.decode("latin1", errors="ignore")
+        for item in re.findall(rb"[A-Za-z0-9_ .,:;!?()/\\-]{5,}", data)
+    ]
+    interesting = []
+    macro_pattern = re.compile(r"\b(?:Sub\s+)?[A-Za-z0-9_]+_Click\b|\bbtn[A-Za-z0-9_]+\b", re.IGNORECASE)
+    for item in ascii_strings:
+        if macro_pattern.search(item):
+            interesting.append(item.strip())
+
+    summary["macro_like_names"] = sorted(set(interesting))[:50]
+    summary["strings"] = sorted(set(ascii_strings))[:100]
+    return summary

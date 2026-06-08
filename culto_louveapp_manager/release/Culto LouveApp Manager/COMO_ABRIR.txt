@@ -1,0 +1,25 @@
+﻿COMO ABRIR
+
+1. Clique duas vezes em:
+
+   Culto LouveApp Manager.exe
+
+2. Mantenha este arquivo .exe dentro desta mesma pasta.
+
+3. Nao apague a pasta _internal. Ela contem os arquivos internos do aplicativo.
+
+4. O arquivo .env fica fora do executavel e deve permanecer nesta pasta para importar do LouveApp.
+
+5. Os arquivos gerados ficam em output.
+
+6. Logs e debug ficam em data.
+
+7. Para importar o Excel antigo, coloque BOLETIM_VBA_CORRIGIDO.xlsm dentro de legacy.
+
+NOVO FLUXO DO BOLETIM
+
+Na aba Boletins, escolha primeiro a Escala LouveApp. Depois, em cada campo de musica, selecione manualmente uma das musicas daquela escala.
+
+Ao selecionar uma musica, o sistema preenche Titulo, Cantor/Grupo e Tom quando esses dados existem no LouveApp.
+
+O sistema nao coloca as musicas automaticamente em sequencia, porque o LouveApp nao informa em qual momento cada musica sera tocada.
